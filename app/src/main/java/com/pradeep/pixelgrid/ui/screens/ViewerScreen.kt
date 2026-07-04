@@ -143,7 +143,8 @@ fun ViewerScreen(
 
     // Dynamic animated background color fading between theme background and black fullscreen
     val targetBgColor = if (showUi) {
-        if (darkTheme) Color.Black else MaterialTheme.colorScheme.background
+        // Use a premium dark zinc background when UI is visible to focus the image properly, regardless of theme
+        Color(0xFF09090B)
     } else {
         Color.Black
     }

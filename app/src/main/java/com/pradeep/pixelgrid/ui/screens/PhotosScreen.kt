@@ -50,7 +50,7 @@ import java.util.*
 fun PhotosScreen(
     mediaList: List<MediaItem>,
     gridColumns: Int,
-    onMediaClick: (MediaItem) -> Unit,
+    onMediaClick: (List<MediaItem>, Int) -> Unit,
     onRefresh: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -279,7 +279,7 @@ fun PhotosScreen(
                                                         selectedItems.add(item)
                                                     }
                                                 } else {
-                                                    onMediaClick(item)
+                                                    onMediaClick(mediaList, mediaList.indexOf(item))
                                                 }
                                             },
                                             onLongClick = {

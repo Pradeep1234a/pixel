@@ -7,20 +7,30 @@ import android.view.ViewGroup
 import android.widget.FrameLayout
 import androidx.annotation.OptIn
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.Info
-import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -35,6 +45,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -45,51 +56,73 @@ import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
 import coil.compose.AsyncImage
 import com.pradeep.pixelgrid.data.MediaItem
-import com.pradeep.pixelgrid.data.MediaRepository
 import com.pradeep.pixelgrid.ui.components.ShadcnCard
 import java.text.SimpleDateFormat
 import java.util.*
+import kotlinx.coroutines.launch
 
 @OptIn(UnstableApi::class)
+@ExperimentalFoundationApi
 @Composable
 fun ViewerScreen(
-    item: MediaItem,
+    mediaList: List<MediaItem>,
+    initialIndex: Int,
     onBack: () -> Unit,
     onFavoriteToggle: (MediaItem) -> Unit,
+    onDeleteMedia: (MediaItem) -> Unit,
     videoAutoplay: Boolean = true,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
     var showUi by remember { mutableStateOf(true) }
     var showInfoDrawer by remember { mutableStateOf(false) }
 
-    // Dynamic system bars configuration for immersive dark theme viewing
+    // Set up horizontal pager state
+    val pagerState = rememberPagerState(initialPage = initialIndex, pageCount = { mediaList.size })
+
+    // Find the currently active item
+    val activeItem = mediaList.getOrNull(pagerState.currentPage) ?: return
+
+    // Lazy list state for the bottom thumbnail strip
+    val lazyListState = rememberLazyListState()
+
+    // Auto-scroll the thumbnail strip to follow pager swipes
+    LaunchedEffect(pagerState.currentPage) {
+        if (mediaList.isNotEmpty()) {
+            lazyListState.animateScrollToItem(pagerState.currentPage)
+        }
+    }
+
+    // Dynamic system bars configuration to hide/show them in fullscreen mode
     val view = androidx.compose.ui.platform.LocalView.current
     if (!view.isInEditMode) {
         val window = (view.context as android.app.Activity).window
-        DisposableEffect(Unit) {
+        DisposableEffect(showUi) {
             val insetsController = androidx.core.view.WindowCompat.getInsetsController(window, view)
-            val originalLightStatus = insetsController.isAppearanceLightStatusBars
-            val originalLightNav = insetsController.isAppearanceLightNavigationBars
-            
-            // Force dark style (white icons on black backdrop)
             insetsController.isAppearanceLightStatusBars = false
             insetsController.isAppearanceLightNavigationBars = false
             
+            if (showUi) {
+                insetsController.show(androidx.core.view.WindowInsetsCompat.Type.systemBars())
+            } else {
+                insetsController.hide(androidx.core.view.WindowInsetsCompat.Type.systemBars())
+                insetsController.systemBarsBehavior = androidx.core.view.WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+            }
+            
             onDispose {
-                // Restore original styling on back
-                insetsController.isAppearanceLightStatusBars = originalLightStatus
-                insetsController.isAppearanceLightNavigationBars = originalLightNav
+                // Ensure system bars are restored when leaving the viewer screen
+                insetsController.show(androidx.core.view.WindowInsetsCompat.Type.systemBars())
             }
         }
     }
 
-    // Media file sharing intent
+    // Media file sharing intent for the active item
     val shareMedia = {
         val intent = Intent().apply {
             action = Intent.ACTION_SEND
-            putExtra(Intent.EXTRA_STREAM, item.uri)
-            type = item.mimeType
+            putExtra(Intent.EXTRA_STREAM, activeItem.uri)
+            type = activeItem.mimeType
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         }
         context.startActivity(Intent.createChooser(intent, "Share Media"))
@@ -100,28 +133,37 @@ fun ViewerScreen(
             .fillMaxSize()
             .background(Color.Black)
     ) {
-        // --- MEDIA CONTENT ---
-        if (item.isVideo) {
-            VideoPlayer(
-                uri = item.uri,
-                autoplay = videoAutoplay,
-                onTap = { showUi = !showUi },
-                modifier = Modifier.fillMaxSize()
-            )
-        } else {
-            ImageViewer(
-                uri = item.uri,
-                name = item.name,
-                onTap = { showUi = !showUi },
-                modifier = Modifier.fillMaxSize()
-            )
+        // --- HORIZONTAL PAGER CONTENT ---
+        HorizontalPager(
+            state = pagerState,
+            modifier = Modifier.fillMaxSize(),
+            pageSpacing = 16.dp
+        ) { page ->
+            val pageItem = mediaList.getOrNull(page)
+            if (pageItem != null) {
+                if (pageItem.isVideo) {
+                    VideoPlayer(
+                        uri = pageItem.uri,
+                        autoplay = videoAutoplay && page == pagerState.currentPage,
+                        onTap = { showUi = !showUi },
+                        modifier = Modifier.fillMaxSize()
+                    )
+                } else {
+                    ImageViewer(
+                        uri = pageItem.uri,
+                        name = pageItem.name,
+                        onTap = { showUi = !showUi },
+                        modifier = Modifier.fillMaxSize()
+                    )
+                }
+            }
         }
 
         // --- TOP ACTION BAR & CONTROL OVERLAY ---
         AnimatedVisibility(
             visible = showUi,
-            enter = slideInVertically(initialOffsetY = { -it }),
-            exit = slideOutVertically(targetOffsetY = { -it }),
+            enter = slideInVertically(initialOffsetY = { -it }) + fadeIn(),
+            exit = slideOutVertically(targetOffsetY = { -it }) + fadeOut(),
             modifier = Modifier.align(Alignment.TopCenter)
         ) {
             Surface(
@@ -134,39 +176,109 @@ fun ViewerScreen(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 8.dp, vertical = 12.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
+                        .padding(horizontal = 8.dp, vertical = 8.dp),
+                    horizontalArrangement = Arrangement.Start,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        IconButton(onClick = onBack) {
-                            Icon(Icons.Default.ArrowBack, contentDescription = "Back", tint = Color.White)
-                        }
-                        Spacer(Modifier.width(8.dp))
+                    IconButton(onClick = onBack) {
+                        Icon(Icons.Default.ArrowBack, contentDescription = "Back", tint = Color.White)
+                    }
+                    Spacer(Modifier.width(12.dp))
+                    Column {
                         Text(
-                            text = item.name,
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.SemiBold,
-                            color = Color.White,
-                            maxLines = 1,
-                            modifier = Modifier.widthIn(max = 200.dp)
+                            text = formatHeaderDate(activeItem.dateAdded),
+                            style = MaterialTheme.typography.titleMedium.copy(fontSize = 17.sp),
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White
+                        )
+                        Text(
+                            text = formatHeaderTime(activeItem.dateAdded),
+                            style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
+                            color = Color.White.copy(alpha = 0.7f)
                         )
                     }
+                }
+            }
+        }
 
-                    Row {
-                        IconButton(onClick = { onFavoriteToggle(item) }) {
-                            Icon(
-                                imageVector = if (item.isFavorite) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
-                                contentDescription = "Favorite",
-                                tint = if (item.isFavorite) Color.Red else Color.White
+        // --- BOTTOM PANEL OVERLAY (Carousel Strip + Action Bar) ---
+        AnimatedVisibility(
+            visible = showUi && !showInfoDrawer,
+            enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
+            exit = slideOutVertically(targetOffsetY = { it }) + fadeOut(),
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .navigationBarsPadding()
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(Color.Black.copy(alpha = 0.6f))
+                    .padding(vertical = 12.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                // 1. Horizontal Previews Strip
+                LazyRow(
+                    state = lazyListState,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(48.dp),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    contentPadding = PaddingValues(horizontal = 16.dp)
+                ) {
+                    itemsIndexed(mediaList) { index, item ->
+                        val isSelected = pagerState.currentPage == index
+                        Box(
+                            modifier = Modifier
+                                .size(40.dp)
+                                .clip(RoundedCornerShape(6.dp))
+                                .border(
+                                    width = if (isSelected) 2.dp else 0.dp,
+                                    color = if (isSelected) Color.White else Color.Transparent,
+                                    shape = RoundedCornerShape(6.dp)
+                                )
+                                .clickable {
+                                    coroutineScope.launch {
+                                        pagerState.animateScrollToPage(index)
+                                    }
+                                }
+                        ) {
+                            AsyncImage(
+                                model = item.uri,
+                                contentDescription = item.name,
+                                modifier = Modifier.fillMaxSize(),
+                                contentScale = ContentScale.Crop
                             )
                         }
-                        IconButton(onClick = shareMedia) {
+                    }
+                }
+
+                // 2. Control Action Buttons Row (Share, Favorite, Delete, Info)
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 24.dp),
+                    horizontalArrangement = Arrangement.SpaceAround,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    IconButton(onClick = shareMedia) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
                             Icon(Icons.Default.Share, contentDescription = "Share", tint = Color.White)
                         }
-                        IconButton(onClick = { showInfoDrawer = !showInfoDrawer }) {
-                            Icon(Icons.Default.Info, contentDescription = "Info", tint = Color.White)
-                        }
+                    }
+                    IconButton(onClick = { onFavoriteToggle(activeItem) }) {
+                        Icon(
+                            imageVector = if (activeItem.isFavorite) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
+                            contentDescription = "Favorite",
+                            tint = if (activeItem.isFavorite) Color.Red else Color.White
+                        )
+                    }
+                    IconButton(onClick = { onDeleteMedia(activeItem) }) {
+                        Icon(Icons.Default.Delete, contentDescription = "Delete", tint = Color.White)
+                    }
+                    IconButton(onClick = { showInfoDrawer = true }) {
+                        Icon(Icons.Default.Info, contentDescription = "Info", tint = Color.White)
                     }
                 }
             }
@@ -213,15 +325,15 @@ fun ViewerScreen(
                     verticalArrangement = Arrangement.spacedBy(10.dp),
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    InfoRow(label = "Filename", value = item.name)
-                    InfoRow(label = "Folder", value = item.bucketName)
-                    InfoRow(label = "Type", value = item.mimeType)
-                    InfoRow(label = "Size", value = formatSize(item.size))
-                    if (item.width > 0 && item.height > 0) {
-                        InfoRow(label = "Resolution", value = "${item.width} x ${item.height}")
+                    InfoRow(label = "Filename", value = activeItem.name)
+                    InfoRow(label = "Folder", value = activeItem.bucketName)
+                    InfoRow(label = "Type", value = activeItem.mimeType)
+                    InfoRow(label = "Size", value = formatSize(activeItem.size))
+                    if (activeItem.width > 0 && activeItem.height > 0) {
+                        InfoRow(label = "Resolution", value = "${activeItem.width} x ${activeItem.height}")
                     }
-                    InfoRow(label = "Date Modified", value = formatFullDate(item.dateAdded))
-                    InfoRow(label = "File Path", value = item.path)
+                    InfoRow(label = "Date Modified", value = formatFullDate(activeItem.dateAdded))
+                    InfoRow(label = "File Path", value = activeItem.path)
                 }
             }
         }
@@ -324,6 +436,11 @@ private fun VideoPlayer(
         }
     }
 
+    // React to active page changed autoplay toggles
+    LaunchedEffect(autoplay) {
+        exoPlayer.playWhenReady = autoplay
+    }
+
     DisposableEffect(Unit) {
         onDispose {
             exoPlayer.release()
@@ -355,6 +472,17 @@ private fun VideoPlayer(
             modifier = Modifier.fillMaxSize()
         )
     }
+}
+
+// Helpers to format timestamp to date string in title
+private fun formatHeaderDate(timestampSeconds: Long): String {
+    val date = Date(timestampSeconds * 1000)
+    return SimpleDateFormat("d MMMM", Locale.getDefault()).format(date)
+}
+
+private fun formatHeaderTime(timestampSeconds: Long): String {
+    val date = Date(timestampSeconds * 1000)
+    return SimpleDateFormat("HH:mm", Locale.getDefault()).format(date)
 }
 
 // Helper to format bytes to readable size

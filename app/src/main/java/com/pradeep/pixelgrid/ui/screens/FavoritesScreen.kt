@@ -27,7 +27,7 @@ import com.pradeep.pixelgrid.data.MediaItem
 fun FavoritesScreen(
     mediaList: List<MediaItem>,
     gridColumns: Int,
-    onMediaClick: (MediaItem) -> Unit,
+    onMediaClick: (List<MediaItem>, Int) -> Unit,
     modifier: Modifier = Modifier
 ) {
     val favorites = remember(mediaList) {
@@ -92,7 +92,7 @@ fun FavoritesScreen(
                             .clip(RoundedCornerShape(8.dp))
                             .background(MaterialTheme.colorScheme.secondary)
                             .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(8.dp))
-                            .clickable { onMediaClick(item) }
+                            .clickable { onMediaClick(favorites, favorites.indexOf(item)) }
                     ) {
                         AsyncImage(
                             model = item.uri,

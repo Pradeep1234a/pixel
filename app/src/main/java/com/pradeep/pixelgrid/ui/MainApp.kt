@@ -6,11 +6,13 @@ import android.content.pm.PackageManager
 import android.os.Build
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.IntentSenderRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
@@ -47,6 +49,7 @@ private const val PREFS_NAME = "pixelvault_settings"
 private const val KEY_COLUMNS = "grid_columns"
 private const val KEY_AUTOPLAY = "video_autoplay"
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun MainApp(
     darkTheme: Boolean,
@@ -67,7 +70,11 @@ fun MainApp(
 
     // Navigation and screen focus states
     var currentTab by remember { mutableStateOf(0) }
-    var activeViewerItem by remember { mutableStateOf<MediaItem?>(null) }
+    
+    // Swipe pager viewer states
+    var viewerMediaList by remember { mutableStateOf<List<MediaItem>>(emptyList()) }
+    var viewerInitialIndex by remember { mutableStateOf(-1) }
+    var itemToDelete by remember { mutableStateOf<MediaItem?>(null) }
 
     // Update checker states
     var updateInfo by remember { mutableStateOf<UpdateInfo?>(null) }
@@ -98,6 +105,46 @@ fun MainApp(
         hasPermission = granted
         if (granted) {
             refreshMedia()
+        }
+    }
+
+    // Recoverable security exception launcher for viewer deletion dialog
+    val viewerDeleteLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartIntentSenderForResult()
+    ) { result ->
+        if (result.resultCode == android.app.Activity.RESULT_OK) {
+            val deleted = itemToDelete
+            if (deleted != null) {
+                viewerMediaList = viewerMediaList.filter { it.id != deleted.id }
+                refreshMedia()
+                if (viewerMediaList.isEmpty()) {
+                    viewerInitialIndex = -1
+                }
+            }
+            itemToDelete = null
+        }
+    }
+
+    // Handle single item deletion in viewer
+    val deleteViewerItem: (MediaItem) -> Unit = { item ->
+        itemToDelete = item
+        coroutineScope.launch {
+            try {
+                val sender = MediaRepository.deleteMediaItem(context, item)
+                if (sender != null) {
+                    viewerDeleteLauncher.launch(IntentSenderRequest.Builder(sender).build())
+                } else {
+                    viewerMediaList = viewerMediaList.filter { it.id != item.id }
+                    refreshMedia()
+                    if (viewerMediaList.isEmpty()) {
+                        viewerInitialIndex = -1
+                    }
+                    itemToDelete = null
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+                itemToDelete = null
+            }
         }
     }
 
@@ -145,7 +192,7 @@ fun MainApp(
         Box(modifier = Modifier.fillMaxSize()) {
             Scaffold(
                 topBar = {
-                    if (activeViewerItem == null) {
+                    if (viewerInitialIndex == -1) {
                         ShadcnTopBar(
                             title = "PixelVault",
                             navigationIcon = {
@@ -224,18 +271,27 @@ fun MainApp(
                             0 -> PhotosScreen(
                                 mediaList = mediaList,
                                 gridColumns = gridColumns,
-                                onMediaClick = { activeViewerItem = it },
+                                onMediaClick = { list, index ->
+                                    viewerMediaList = list
+                                    viewerInitialIndex = index
+                                },
                                 onRefresh = refreshMedia
                             )
                             1 -> AlbumsScreen(
                                 mediaList = mediaList,
                                 gridColumns = gridColumns,
-                                onMediaClick = { activeViewerItem = it }
+                                onMediaClick = { list, index ->
+                                    viewerMediaList = list
+                                    viewerInitialIndex = index
+                                }
                             )
                             2 -> FavoritesScreen(
                                 mediaList = mediaList,
                                 gridColumns = gridColumns,
-                                onMediaClick = { activeViewerItem = it }
+                                onMediaClick = { list, index ->
+                                    viewerMediaList = list
+                                    viewerInitialIndex = index
+                                }
                             )
                             3 -> {
                                 val totalSize = remember(mediaList) { mediaList.sumOf { it.size } }
@@ -264,22 +320,25 @@ fun MainApp(
 
             // --- FULL SCREEN OVERLAY VIEW SCREEN ---
             AnimatedVisibility(
-                visible = activeViewerItem != null,
+                visible = viewerInitialIndex != -1,
                 enter = fadeIn(),
                 exit = fadeOut()
             ) {
-                activeViewerItem?.let { item ->
+                if (viewerInitialIndex != -1) {
                     val favoriteIds = remember(mediaList) { MediaRepository.getFavoriteIds(context) }
-                    val currentItemWithFavorite = item.copy(isFavorite = favoriteIds.contains(item.id))
+                    // Map items to update favorite states dynamically on paging
+                    val listWithFavorites = viewerMediaList.map { it.copy(isFavorite = favoriteIds.contains(it.id)) }
 
                     ViewerScreen(
-                        item = currentItemWithFavorite,
-                        onBack = { activeViewerItem = null },
+                        mediaList = listWithFavorites,
+                        initialIndex = viewerInitialIndex,
+                        onBack = { viewerInitialIndex = -1 },
                         videoAutoplay = videoAutoplay,
                         onFavoriteToggle = { clickedItem ->
                             MediaRepository.toggleFavorite(context, clickedItem.id)
                             refreshMedia()
-                        }
+                        },
+                        onDeleteMedia = deleteViewerItem
                     )
                 }
             }

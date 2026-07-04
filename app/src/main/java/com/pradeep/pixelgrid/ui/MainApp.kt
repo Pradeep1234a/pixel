@@ -54,6 +54,7 @@ import com.pradeep.pixelgrid.ui.components.ShadcnButton
 import com.pradeep.pixelgrid.ui.components.ShadcnButtonVariant
 import com.pradeep.pixelgrid.ui.components.ShadcnDialog
 import com.pradeep.pixelgrid.ui.components.ShadcnTopBar
+import com.pradeep.pixelgrid.ui.components.ShadcnBadge
 import com.pradeep.pixelgrid.ui.screens.*
 import kotlinx.coroutines.launch
 
@@ -449,15 +450,27 @@ fun MainApp(
                                             }
                                         }
                                     } else {
-                                        Text(
-                                            text = activeTitle,
-                                            fontSize = (28f - (10f * scrollFraction)).sp,
-                                            fontWeight = FontWeight.Bold,
-                                            color = MaterialTheme.colorScheme.onBackground,
+                                        Row(
                                             modifier = Modifier
                                                 .align(Alignment.BottomStart)
-                                                .padding(bottom = (12f + (4f * scrollFraction)).dp)
-                                        )
+                                                .padding(bottom = (12f + (4f * scrollFraction)).dp),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                        ) {
+                                            Text(
+                                                text = activeTitle,
+                                                fontSize = (28f - (10f * scrollFraction)).sp,
+                                                fontWeight = FontWeight.Bold,
+                                                color = MaterialTheme.colorScheme.onBackground
+                                            )
+                                            if (UpdateManager.isBetaBuild(context)) {
+                                                ShadcnBadge(
+                                                    text = "BETA",
+                                                    color = MaterialTheme.colorScheme.primary,
+                                                    textColor = MaterialTheme.colorScheme.onPrimary
+                                                )
+                                            }
+                                        }
 
                                         Row(
                                             modifier = Modifier

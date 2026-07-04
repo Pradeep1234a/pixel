@@ -39,6 +39,11 @@ object UpdateManager {
         }
     }
 
+    // Check if the current app build is a beta version
+    fun isBetaBuild(context: Context): Boolean {
+        return getCurrentVersionName(context).contains("beta", ignoreCase = true)
+    }
+
     // Helper to parse semantic versions into a comparable structure: Pair(mainPartsList, betaIndex)
     fun parseVersion(versionStr: String): Pair<List<Int>, Int> {
         val clean = versionStr.replace("v", "").trim()

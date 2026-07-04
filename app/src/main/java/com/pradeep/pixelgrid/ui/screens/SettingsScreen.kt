@@ -20,6 +20,8 @@ import com.pradeep.pixelgrid.ui.components.ShadcnButton
 import com.pradeep.pixelgrid.ui.components.ShadcnButtonVariant
 import com.pradeep.pixelgrid.ui.components.ShadcnCard
 import com.pradeep.pixelgrid.ui.components.ShadcnTabSwitch
+import com.pradeep.pixelgrid.ui.components.ShadcnBadge
+import com.pradeep.pixelgrid.data.UpdateManager
 import coil.annotation.ExperimentalCoilApi
 import java.util.*
 
@@ -43,6 +45,13 @@ fun SettingsScreen(
 ) {
     val scrollState = rememberScrollState()
     val context = LocalContext.current
+    val isBeta = remember { UpdateManager.isBetaBuild(context) }
+    val appVersion = remember { UpdateManager.getCurrentVersionName(context) }
+
+    // Mock states for experimental beta-only features
+    var aiSearchEnabled by remember { mutableStateOf(false) }
+    var smartCategorizationEnabled by remember { mutableStateOf(true) }
+    var photoUpscaleEnabled by remember { mutableStateOf(false) }
 
     val scrollFraction by remember {
         derivedStateOf {
@@ -215,15 +224,15 @@ fun SettingsScreen(
                     )
                     Column {
                         Text(
-                            text = "PixelVault Gallery v1.0",
+                            text = if (isBeta) "PixelVault Beta v$appVersion" else "PixelVault Stable v$appVersion",
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.Bold,
                             color = MaterialTheme.colorScheme.onBackground
                         )
                         Text(
-                            text = "Designed with Shadcn UI & Compose components",
+                            text = if (isBeta) "Experimental features enabled for beta testing" else "Designed with Shadcn UI & Compose components",
                             style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.5f)
+                            color = if (isBeta) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onBackground.copy(alpha = 0.5f)
                         )
                     }
                 }
@@ -253,6 +262,85 @@ fun SettingsScreen(
                     },
                     modifier = Modifier.fillMaxWidth()
                 )
+            }
+
+            if (isBeta) {
+                // --- EXPERIMENTAL BETA FEATURES CARD ---
+                ShadcnCard(modifier = Modifier.fillMaxWidth()) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "Experimental Beta Features",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onBackground
+                        )
+                        ShadcnBadge(
+                            text = "BETA ONLY",
+                            color = MaterialTheme.colorScheme.primary,
+                            textColor = MaterialTheme.colorScheme.onPrimary
+                        )
+                    }
+                    Text(
+                        text = "Toggle future functions being tested on the Beta channel",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.5f)
+                    )
+                    Spacer(Modifier.height(16.dp))
+
+                    // AI Search Toggle
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("AI Semantic Search", fontWeight = FontWeight.Bold)
+                            Text("Search using natural queries", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.5f))
+                        }
+                        Switch(
+                            checked = aiSearchEnabled,
+                            onCheckedChange = { aiSearchEnabled = it }
+                        )
+                    }
+                    Spacer(Modifier.height(12.dp))
+
+                    // Smart Categorization Toggle
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("Smart Categorization", fontWeight = FontWeight.Bold)
+                            Text("Clustering people, places, things", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.5f))
+                        }
+                        Switch(
+                            checked = smartCategorizationEnabled,
+                            onCheckedChange = { smartCategorizationEnabled = it }
+                        )
+                    }
+                    Spacer(Modifier.height(12.dp))
+
+                    // Photo Upscaling Toggle
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("Photo Upscaling", fontWeight = FontWeight.Bold)
+                            Text("Super-resolution zoom enhancer", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.5f))
+                        }
+                        Switch(
+                            checked = photoUpscaleEnabled,
+                            onCheckedChange = { photoUpscaleEnabled = it }
+                        )
+                    }
+                }
             }
 
             // --- UPDATE CHECKER INITIATOR ---

@@ -26,6 +26,9 @@ import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.List
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -37,6 +40,12 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.*
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.animation.core.animateDpAsState
 import com.pradeep.pixelgrid.data.MediaItem
 import com.pradeep.pixelgrid.data.MediaRepository
 import com.pradeep.pixelgrid.data.UpdateInfo
@@ -73,6 +82,8 @@ fun MainApp(
 
     // Navigation and screen focus states
     var currentTab by remember { mutableStateOf(0) }
+    var isSelectionActive by remember { mutableStateOf(false) }
+    var activeAlbumName by remember { mutableStateOf<String?>(null) }
     
     // Swipe pager viewer states
     var viewerMediaList by remember { mutableStateOf<List<MediaItem>>(emptyList()) }
@@ -83,6 +94,15 @@ fun MainApp(
     var updateInfo by remember { mutableStateOf<UpdateInfo?>(null) }
     var downloadProgress by remember { mutableStateOf<Float?>(null) }
     var downloadedFile by remember { mutableStateOf<java.io.File?>(null) }
+
+    // Update channel state
+    var updateChannel by remember { 
+        mutableStateOf(prefs.getString("update_channel", "stable") ?: "stable") 
+    }
+
+    // Search query states
+    var searchQuery by remember { mutableStateOf("") }
+    var isSearchExpanded by remember { mutableStateOf(false) }
 
     // Refresh function to reload MediaStore content
     val refreshMedia: () -> Unit = {
@@ -196,54 +216,62 @@ fun MainApp(
 
         LaunchedEffect(currentTab) {
             scrollFraction = 0f
+            isSelectionActive = false
+            activeAlbumName = null
+            isSearchExpanded = false
+            searchQuery = ""
         }
 
-        Box(modifier = Modifier.fillMaxSize()) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+        ) {
             Scaffold(
                 topBar = {},
                 bottomBar = {
-                    // Custom navigation bar styled like Shadcn Tablist
-                    Surface(
-                        color = MaterialTheme.colorScheme.background,
-                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        NavigationBar(
-                            containerColor = Color.Transparent,
-                            tonalElevation = 0.dp,
-                            modifier = Modifier.navigationBarsPadding().height(64.dp)
+                    if (viewerInitialIndex == -1 && !isSelectionActive) {
+                        Surface(
+                            color = MaterialTheme.colorScheme.background,
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
+                            modifier = Modifier.fillMaxWidth()
                         ) {
-                            val tabs = listOf(
-                                NavigationTab("Photos", Icons.Default.Home),
-                                NavigationTab("Albums", Icons.Default.List),
-                                NavigationTab("Favorites", Icons.Default.Favorite),
-                                NavigationTab("Settings", Icons.Default.Settings)
-                            )
-                            
-                            tabs.forEachIndexed { index, tab ->
-                                val isSelected = currentTab == index
-                                NavigationBarItem(
-                                    selected = isSelected,
-                                    onClick = { currentTab = index },
-                                    icon = {
-                                        Icon(
-                                            imageVector = tab.icon,
-                                            contentDescription = tab.label,
-                                            tint = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onBackground.copy(alpha = 0.5f)
-                                        )
-                                    },
-                                    label = {
-                                        Text(
-                                            text = tab.label,
-                                            style = MaterialTheme.typography.labelMedium.copy(fontSize = 11.sp),
-                                            fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Medium,
-                                            color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onBackground.copy(alpha = 0.5f)
-                                        )
-                                    },
-                                    colors = NavigationBarItemDefaults.colors(
-                                        indicatorColor = MaterialTheme.colorScheme.secondary
-                                    )
+                            NavigationBar(
+                                containerColor = Color.Transparent,
+                                tonalElevation = 0.dp,
+                                modifier = Modifier.navigationBarsPadding().height(64.dp)
+                            ) {
+                                val tabs = listOf(
+                                    NavigationTab("Photos", Icons.Default.Home),
+                                    NavigationTab("Albums", Icons.Default.List),
+                                    NavigationTab("Favorites", Icons.Default.Favorite),
+                                    NavigationTab("Settings", Icons.Default.Settings)
                                 )
+                                
+                                tabs.forEachIndexed { index, tab ->
+                                    val isSelected = currentTab == index
+                                    NavigationBarItem(
+                                        selected = isSelected,
+                                        onClick = { currentTab = index },
+                                        icon = {
+                                            Icon(
+                                                imageVector = tab.icon,
+                                                contentDescription = tab.label,
+                                                tint = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onBackground.copy(alpha = 0.5f)
+                                            )
+                                        },
+                                        label = {
+                                            Text(
+                                                text = tab.label,
+                                                style = MaterialTheme.typography.labelMedium.copy(fontSize = 11.sp),
+                                                fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Medium,
+                                                color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onBackground.copy(alpha = 0.5f)
+                                            )
+                                        },
+                                        colors = NavigationBarItemDefaults.colors(
+                                            indicatorColor = MaterialTheme.colorScheme.secondary
+                                        )
+                                    )
+                                }
                             }
                         }
                     }
@@ -262,11 +290,26 @@ fun MainApp(
                         }
                     } else {
                         val statusBarHeight = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
-                        val topPaddingValue = 96.dp + statusBarHeight
+                        val topPaddingValue = if (isSearchExpanded) {
+                            56.dp + statusBarHeight
+                        } else {
+                            96.dp + statusBarHeight
+                        }
+
+                        val filteredMediaList = remember(mediaList, searchQuery) {
+                            if (searchQuery.isBlank()) {
+                                mediaList
+                            } else {
+                                mediaList.filter { item ->
+                                    item.name.contains(searchQuery, ignoreCase = true) ||
+                                    item.bucketName.contains(searchQuery, ignoreCase = true)
+                                }
+                            }
+                        }
 
                         when (currentTab) {
                             0 -> PhotosScreen(
-                                mediaList = mediaList,
+                                mediaList = filteredMediaList,
                                 gridColumns = gridColumns,
                                 onMediaClick = { list, index ->
                                     viewerMediaList = list
@@ -277,7 +320,7 @@ fun MainApp(
                                 onScrollChange = { scrollFraction = it }
                             )
                             1 -> AlbumsScreen(
-                                mediaList = mediaList,
+                                mediaList = filteredMediaList,
                                 gridColumns = gridColumns,
                                 onMediaClick = { list, index ->
                                     viewerMediaList = list
@@ -287,7 +330,7 @@ fun MainApp(
                                 onScrollChange = { scrollFraction = it }
                             )
                             2 -> FavoritesScreen(
-                                mediaList = mediaList,
+                                mediaList = filteredMediaList,
                                 gridColumns = gridColumns,
                                 onMediaClick = { list, index ->
                                     viewerMediaList = list
@@ -311,6 +354,11 @@ fun MainApp(
                                         videoAutoplay = autoplay
                                         prefs.edit().putBoolean(KEY_AUTOPLAY, autoplay).apply()
                                     },
+                                    updateChannel = updateChannel,
+                                    onUpdateChannelChange = { channel ->
+                                        updateChannel = channel
+                                        prefs.edit().putString("update_channel", channel).apply()
+                                    },
                                     totalCount = mediaList.size,
                                     totalSize = totalSize,
                                     onCheckForUpdates = triggerManualUpdateCheck,
@@ -330,7 +378,11 @@ fun MainApp(
                             else -> "Settings"
                         }
                         val statusBarHeight = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
-                        val totalHeaderHeight = statusBarHeight + (96f - (40f * scrollFraction)).dp
+                        val totalHeaderHeight = if (isSearchExpanded) {
+                            statusBarHeight + 56.dp
+                        } else {
+                            statusBarHeight + (96f - (40f * scrollFraction)).dp
+                        }
 
                         Column(
                             modifier = Modifier
@@ -349,34 +401,94 @@ fun MainApp(
                                         .statusBarsPadding()
                                         .padding(horizontal = 16.dp)
                                 ) {
-                                    Text(
-                                        text = activeTitle,
-                                        fontSize = (28f - (10f * scrollFraction)).sp,
-                                        fontWeight = FontWeight.Bold,
-                                        color = MaterialTheme.colorScheme.onBackground,
-                                        modifier = Modifier
-                                            .align(Alignment.BottomStart)
-                                            .padding(bottom = (12f + (4f * scrollFraction)).dp)
-                                    )
+                                    if (isSearchExpanded) {
+                                        Row(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .height(56.dp),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                        ) {
+                                            IconButton(onClick = { 
+                                                isSearchExpanded = false 
+                                                searchQuery = ""
+                                            }) {
+                                                Icon(
+                                                    imageVector = Icons.Default.ArrowBack,
+                                                    contentDescription = "Collapse search",
+                                                    tint = MaterialTheme.colorScheme.onBackground
+                                                )
+                                            }
 
-                                    Box(
-                                        modifier = Modifier
-                                            .align(Alignment.TopEnd)
-                                            .height(56.dp),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        Icon(
-                                            painter = painterResource(id = com.pradeep.pixelgrid.R.drawable.ic_launcher_foreground),
-                                            contentDescription = "PixelVault Logo",
-                                            tint = MaterialTheme.colorScheme.primary,
-                                            modifier = Modifier.size(28.dp)
+                                            OutlinedTextField(
+                                                value = searchQuery,
+                                                onValueChange = { searchQuery = it },
+                                                placeholder = { Text("Search photos...", color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.5f)) },
+                                                modifier = Modifier
+                                                    .weight(1f)
+                                                    .height(40.dp),
+                                                singleLine = true,
+                                                colors = OutlinedTextFieldDefaults.colors(
+                                                    focusedContainerColor = MaterialTheme.colorScheme.secondary,
+                                                    unfocusedContainerColor = MaterialTheme.colorScheme.secondary,
+                                                    focusedBorderColor = MaterialTheme.colorScheme.primary,
+                                                    unfocusedBorderColor = MaterialTheme.colorScheme.outline
+                                                ),
+                                                shape = RoundedCornerShape(8.dp),
+                                                textStyle = LocalTextStyle.current.copy(fontSize = 14.sp)
+                                            )
+
+                                            if (searchQuery.isNotEmpty()) {
+                                                IconButton(onClick = { searchQuery = "" }) {
+                                                    Icon(
+                                                        imageVector = Icons.Default.Close,
+                                                        contentDescription = "Clear search",
+                                                        tint = MaterialTheme.colorScheme.onBackground
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    } else {
+                                        Text(
+                                            text = activeTitle,
+                                            fontSize = (28f - (10f * scrollFraction)).sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = MaterialTheme.colorScheme.onBackground,
+                                            modifier = Modifier
+                                                .align(Alignment.BottomStart)
+                                                .padding(bottom = (12f + (4f * scrollFraction)).dp)
                                         )
+
+                                        Row(
+                                            modifier = Modifier
+                                                .align(Alignment.TopEnd)
+                                                .height(56.dp),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                        ) {
+                                            if (currentTab in 0..2) {
+                                                IconButton(onClick = { isSearchExpanded = true }) {
+                                                    Icon(
+                                                        imageVector = Icons.Default.Search,
+                                                        contentDescription = "Search",
+                                                        tint = MaterialTheme.colorScheme.onBackground
+                                                    )
+                                                }
+                                            }
+
+                                            Icon(
+                                                painter = painterResource(id = com.pradeep.pixelgrid.R.drawable.ic_launcher_foreground),
+                                                contentDescription = "PixelVault Logo",
+                                                tint = MaterialTheme.colorScheme.primary,
+                                                modifier = Modifier.size(28.dp)
+                                            )
+                                        }
                                     }
                                 }
                             }
 
                             val dividerAlpha by animateFloatAsState(
-                                targetValue = if (scrollFraction > 0.1f) 1f else 0f,
+                                targetValue = if (scrollFraction > 0.1f || isSearchExpanded) 1f else 0f,
                                 animationSpec = tween(150)
                             )
                             HorizontalDivider(
@@ -394,23 +506,25 @@ fun MainApp(
                 enter = fadeIn(animationSpec = tween(250)) + slideInVertically(initialOffsetY = { it / 3 }, animationSpec = tween(250)),
                 exit = fadeOut(animationSpec = tween(200)) + slideOutVertically(targetOffsetY = { it / 3 }, animationSpec = tween(200))
             ) {
-                if (viewerInitialIndex != -1) {
-                    val favoriteIds = remember(mediaList) { MediaRepository.getFavoriteIds(context) }
-                    // Map items to update favorite states dynamically on paging
-                    val listWithFavorites = viewerMediaList.map { it.copy(isFavorite = favoriteIds.contains(it.id)) }
+                key(viewerInitialIndex) {
+                    if (viewerInitialIndex != -1) {
+                        val favoriteIds = remember(mediaList) { MediaRepository.getFavoriteIds(context) }
+                        // Map items to update favorite states dynamically on paging
+                        val listWithFavorites = viewerMediaList.map { it.copy(isFavorite = favoriteIds.contains(it.id)) }
 
-                    ViewerScreen(
-                        mediaList = listWithFavorites,
-                        initialIndex = viewerInitialIndex,
-                        onBack = { viewerInitialIndex = -1 },
-                        videoAutoplay = videoAutoplay,
-                        darkTheme = darkTheme,
-                        onFavoriteToggle = { clickedItem ->
-                            MediaRepository.toggleFavorite(context, clickedItem.id)
-                            refreshMedia()
-                        },
-                        onDeleteMedia = deleteViewerItem
-                    )
+                        ViewerScreen(
+                            mediaList = listWithFavorites,
+                            initialIndex = viewerInitialIndex,
+                            onBack = { viewerInitialIndex = -1 },
+                            videoAutoplay = videoAutoplay,
+                            darkTheme = darkTheme,
+                            onFavoriteToggle = { clickedItem ->
+                                MediaRepository.toggleFavorite(context, clickedItem.id)
+                                refreshMedia()
+                            },
+                            onDeleteMedia = deleteViewerItem
+                        )
+                    }
                 }
             }
 

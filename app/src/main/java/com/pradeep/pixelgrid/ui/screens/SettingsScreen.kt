@@ -32,6 +32,8 @@ fun SettingsScreen(
     onColumnsChange: (Int) -> Unit,
     videoAutoplay: Boolean,
     onVideoAutoplayChange: (Boolean) -> Unit,
+    updateChannel: String,
+    onUpdateChannelChange: (String) -> Unit,
     totalCount: Int,
     totalSize: Long,
     onCheckForUpdates: () -> Unit,
@@ -161,7 +163,6 @@ fun SettingsScreen(
 
                 ShadcnButton(
                     onClick = {
-                        // Clear Coil Image Loader Cache
                         val imageLoader = coil.Coil.imageLoader(context)
                         imageLoader.diskCache?.clear()
                         imageLoader.memoryCache?.clear()
@@ -226,6 +227,32 @@ fun SettingsScreen(
                         )
                     }
                 }
+            }
+
+            // --- UPDATE CHANNEL SELECTOR CARD ---
+            ShadcnCard(modifier = Modifier.fillMaxWidth()) {
+                Text(
+                    text = "Update Channel",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onBackground
+                )
+                Text(
+                    text = "Select Stable for tested features or Beta for experimental updates",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.6f)
+                )
+                Spacer(Modifier.height(12.dp))
+
+                ShadcnTabSwitch(
+                    options = listOf("Stable", "Beta"),
+                    selectedIndex = if (updateChannel == "beta") 1 else 0,
+                    onOptionSelected = { index ->
+                        val newChannel = if (index == 1) "beta" else "stable"
+                        onUpdateChannelChange(newChannel)
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                )
             }
 
             // --- UPDATE CHECKER INITIATOR ---

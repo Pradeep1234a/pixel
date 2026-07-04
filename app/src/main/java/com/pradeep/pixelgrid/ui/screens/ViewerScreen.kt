@@ -46,6 +46,8 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -92,10 +94,20 @@ fun ViewerScreen(
     // Lazy list state for the bottom thumbnail strip
     val lazyListState = rememberLazyListState()
 
-    // Auto-scroll the thumbnail strip to follow pager swipes
+    val configuration = LocalConfiguration.current
+    val density = LocalDensity.current
+
+    // Auto-scroll the thumbnail strip to follow pager swipes and center the active item
     LaunchedEffect(pagerState.currentPage) {
         if (mediaList.isNotEmpty()) {
-            lazyListState.animateScrollToItem(pagerState.currentPage)
+            val screenWidthPx = with(density) { configuration.screenWidthDp.dp.toPx() }
+            val itemWidthPx = with(density) { 40.dp.toPx() }
+            val centerOffset = ((screenWidthPx - itemWidthPx) / 2).toInt()
+            
+            lazyListState.animateScrollToItem(
+                index = pagerState.currentPage,
+                scrollOffset = -centerOffset
+            )
         }
         isZoomed = false // Reset zoom state on page change
     }

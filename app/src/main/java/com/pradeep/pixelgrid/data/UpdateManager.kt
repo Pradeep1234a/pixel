@@ -18,6 +18,7 @@ data class UpdateInfo(
     val version: String,       // e.g. "v1.0.2"
     val changelog: String,     // release body notes
     val downloadUrl: String,   // APK download link
+    val isPrerelease: Boolean = false,
     val forceShow: Boolean = false // Bypass 24h snooze (e.g. on manual checks)
 )
 
@@ -38,23 +39,37 @@ object UpdateManager {
         }
     }
 
+    // Helper to parse semantic versions into a comparable structure: Pair(mainPartsList, betaIndex)
+    fun parseVersion(versionStr: String): Pair<List<Int>, Int> {
+        val clean = versionStr.replace("v", "").trim()
+        val parts = clean.split("-")
+        val mainStr = parts.getOrNull(0) ?: "0.0.0"
+        val mainParts = mainStr.split(".").map { it.toIntOrNull() ?: 0 }
+        
+        val betaStr = parts.getOrNull(1) ?: ""
+        val betaNum = if (betaStr.startsWith("beta")) {
+            betaStr.replace("beta", "").toIntOrNull() ?: 0
+        } else {
+            // Stable releases are newer than any beta.
+            9999
+        }
+        return Pair(mainParts, betaNum)
+    }
+
     // Compare two semantic versions. Returns true if latest is newer than current.
     fun isNewerVersion(current: String, latest: String): Boolean {
-        val cleanCurrent = current.replace("v", "").trim()
-        val cleanLatest = latest.replace("v", "").trim()
-        if (cleanCurrent == cleanLatest) return false
+        if (current == latest) return false
+        val (currMain, currBeta) = parseVersion(current)
+        val (lateMain, lateBeta) = parseVersion(latest)
         
-        val currParts = cleanCurrent.split(".").mapNotNull { it.toIntOrNull() }
-        val lateParts = cleanLatest.split(".").mapNotNull { it.toIntOrNull() }
-        val size = maxOf(currParts.size, lateParts.size)
-        
+        val size = maxOf(currMain.size, lateMain.size)
         for (i in 0 until size) {
-            val currVal = currParts.getOrNull(i) ?: 0
-            val lateVal = lateParts.getOrNull(i) ?: 0
+            val currVal = currMain.getOrNull(i) ?: 0
+            val lateVal = lateMain.getOrNull(i) ?: 0
             if (lateVal > currVal) return true
             if (currVal > lateVal) return false
         }
-        return false
+        return lateBeta > currBeta
     }
 
     // Snooze update popup for 24 hours
@@ -79,10 +94,14 @@ object UpdateManager {
         return false
     }
 
-    // Query GitHub API for latest release. Parses JSON using Regex to avoid JSON imports.
+    // Query GitHub API for releases list and filter based on selected update channel (stable vs beta)
     suspend fun checkForUpdates(context: Context, isManualCheck: Boolean = false): UpdateInfo? = withContext(Dispatchers.IO) {
         try {
-            val url = URL("https://api.github.com/repos/Pradeep1234a/pixel/releases/latest")
+            // Read update channel preference from settings shared preferences
+            val settingsPrefs = context.getSharedPreferences("pixelvault_settings", Context.MODE_PRIVATE)
+            val selectedChannel = settingsPrefs.getString("update_channel", "stable") ?: "stable"
+
+            val url = URL("https://api.github.com/repos/Pradeep1234a/pixel/releases")
             val connection = url.openConnection() as HttpURLConnection
             connection.requestMethod = "GET"
             connection.connectTimeout = 10000
@@ -93,38 +112,58 @@ object UpdateManager {
             if (connection.responseCode == 200) {
                 val json = connection.inputStream.bufferedReader().use { it.readText() }
                 
-                // Parse version (tag_name)
-                val tagMatcher = Pattern.compile("\"tag_name\"\\s*:\\s*\"([^\"]+)\"").matcher(json)
-                if (!tagMatcher.find()) return@withContext null
-                val latestVersion = tagMatcher.group(1) ?: return@withContext null
+                // Split the JSON array of objects using a robust regex delimiter to parse them individually
+                val blocks = json.split(Pattern.compile("(^|\\]|\\}),\\s*\\{\"url\""))
                 
-                // Parse changelog (body)
-                val bodyMatcher = Pattern.compile("\"body\"\\s*:\\s*\"([^\"]+)\"").matcher(json)
-                val rawChangelog = if (bodyMatcher.find()) bodyMatcher.group(1) else "No release notes provided."
-                val cleanChangelog = rawChangelog
-                    .replace("\\r\\n", "\n")
-                    .replace("\\n", "\n")
-                    .replace("\\t", "    ")
-                    .replace("\\\"", "\"")
-
-                // Parse APK download URL (look for assets containing browser_download_url ending with .apk)
-                val apkUrlMatcher = Pattern.compile("\"browser_download_url\"\\s*:\\s*\"([^\"]+\\.apk)\"").matcher(json)
-                if (!apkUrlMatcher.find()) return@withContext null
-                val downloadUrl = apkUrlMatcher.group(1) ?: return@withContext null
-
-                val currentVersion = getCurrentVersionName(context)
-                
-                if (isNewerVersion(currentVersion, latestVersion)) {
-                    val snoozed = isUpdateSnoozed(context, latestVersion)
-                    // Show popup if not snoozed OR if triggered manually by user
-                    if (!snoozed || isManualCheck) {
-                        return@withContext UpdateInfo(
-                            version = latestVersion,
-                            changelog = cleanChangelog,
-                            downloadUrl = downloadUrl,
-                            forceShow = isManualCheck
-                        )
+                for (block in blocks) {
+                    val tagMatcher = Pattern.compile("\"tag_name\"\\s*:\\s*\"([^\"]+)\"").matcher(block)
+                    if (!tagMatcher.find()) continue
+                    val latestVersion = tagMatcher.group(1) ?: continue
+                    
+                    val prereleaseMatcher = Pattern.compile("\"prerelease\"\\s*:\\s*(true|false)").matcher(block)
+                    val isPrerelease = if (prereleaseMatcher.find()) prereleaseMatcher.group(1) == "true" else false
+                    
+                    // Filter based on selected channel (stable channel skips pre-releases)
+                    if (selectedChannel == "stable" && isPrerelease) {
+                        continue
                     }
+
+                    // Found the candidate update release! Now parse remaining fields
+                    val bodyMatcher = Pattern.compile("\"body\"\\s*:\\s*\"([^\"]+)\"").matcher(block)
+                    val rawChangelog = if (bodyMatcher.find()) bodyMatcher.group(1) else "No release notes provided."
+                    val cleanChangelog = rawChangelog
+                        .replace("\\r\\n", "\n")
+                        .replace("\\n", "\n")
+                        .replace("\\t", "    ")
+                        .replace("\\\"", "\"")
+
+                    val apkUrlMatcher = Pattern.compile("\"browser_download_url\"\\s*:\\s*\"([^\"]+\\.apk)\"").matcher(block)
+                    if (!apkUrlMatcher.find()) continue
+                    val downloadUrl = apkUrlMatcher.group(1) ?: continue
+
+                    val currentVersion = getCurrentVersionName(context)
+                    
+                    val isNewer = isNewerVersion(currentVersion, latestVersion)
+                    val isDifferent = currentVersion != latestVersion
+
+                    // Trigger update: 
+                    // - On background auto-checks: only if the release version is strictly newer
+                    // - On manual user clicks: if the channel version is different (enabling downgrades/cross-grades)
+                    if (isNewer || (isDifferent && isManualCheck)) {
+                        val snoozed = isUpdateSnoozed(context, latestVersion)
+                        if (!snoozed || isManualCheck) {
+                            return@withContext UpdateInfo(
+                                version = latestVersion,
+                                changelog = cleanChangelog,
+                                downloadUrl = downloadUrl,
+                                isPrerelease = isPrerelease,
+                                forceShow = isManualCheck
+                            )
+                        }
+                    }
+                    
+                    // Since releases are sorted newest first, once we evaluate the latest release matching our channel, we stop.
+                    break
                 }
             }
         } catch (e: Exception) {

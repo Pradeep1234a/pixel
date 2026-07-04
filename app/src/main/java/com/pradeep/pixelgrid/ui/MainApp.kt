@@ -35,8 +35,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
+import androidx.compose.ui.unit.*
 import com.pradeep.pixelgrid.data.MediaItem
 import com.pradeep.pixelgrid.data.MediaRepository
 import com.pradeep.pixelgrid.data.UpdateInfo
@@ -192,23 +191,15 @@ fun MainApp(
             permissionLauncher.launch(permissions)
         }
     } else {
+        var scrollFraction by remember { mutableStateOf(0f) }
+
+        LaunchedEffect(currentTab) {
+            scrollFraction = 0f
+        }
+
         Box(modifier = Modifier.fillMaxSize()) {
             Scaffold(
-                topBar = {
-                    if (viewerInitialIndex == -1) {
-                        ShadcnTopBar(
-                            title = "PixelVault",
-                            navigationIcon = {
-                                Icon(
-                                    painter = painterResource(id = com.pradeep.pixelgrid.R.drawable.ic_launcher_foreground),
-                                    contentDescription = "PixelVault Logo",
-                                    tint = MaterialTheme.colorScheme.primary,
-                                    modifier = Modifier.size(28.dp)
-                                )
-                            }
-                        )
-                    }
-                },
+                topBar = {},
                 bottomBar = {
                     // Custom navigation bar styled like Shadcn Tablist
                     Surface(
@@ -261,7 +252,6 @@ fun MainApp(
                     modifier = Modifier
                         .fillMaxSize()
                         .padding(
-                            top = paddingValues.calculateTopPadding(),
                             bottom = paddingValues.calculateBottomPadding()
                         )
                 ) {
@@ -270,6 +260,9 @@ fun MainApp(
                             CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
                         }
                     } else {
+                        val statusBarHeight = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
+                        val topPaddingValue = 96.dp + statusBarHeight
+
                         when (currentTab) {
                             0 -> PhotosScreen(
                                 mediaList = mediaList,
@@ -278,7 +271,9 @@ fun MainApp(
                                     viewerMediaList = list
                                     viewerInitialIndex = index
                                 },
-                                onRefresh = refreshMedia
+                                onRefresh = refreshMedia,
+                                topPadding = topPaddingValue,
+                                onScrollChange = { scrollFraction = it }
                             )
                             1 -> AlbumsScreen(
                                 mediaList = mediaList,
@@ -286,7 +281,9 @@ fun MainApp(
                                 onMediaClick = { list, index ->
                                     viewerMediaList = list
                                     viewerInitialIndex = index
-                                }
+                                },
+                                topPadding = topPaddingValue,
+                                onScrollChange = { scrollFraction = it }
                             )
                             2 -> FavoritesScreen(
                                 mediaList = mediaList,
@@ -294,7 +291,9 @@ fun MainApp(
                                 onMediaClick = { list, index ->
                                     viewerMediaList = list
                                     viewerInitialIndex = index
-                                }
+                                },
+                                topPadding = topPaddingValue,
+                                onScrollChange = { scrollFraction = it }
                             )
                             3 -> {
                                 val totalSize = remember(mediaList) { mediaList.sumOf { it.size } }
@@ -313,8 +312,62 @@ fun MainApp(
                                     },
                                     totalCount = mediaList.size,
                                     totalSize = totalSize,
-                                    onCheckForUpdates = triggerManualUpdateCheck
+                                    onCheckForUpdates = triggerManualUpdateCheck,
+                                    topPadding = topPaddingValue,
+                                    onScrollChange = { scrollFraction = it }
                                 )
+                            }
+                        }
+                    }
+
+                    // Collapsing Top Bar Overlay (Drawn on top of scrollable edge-to-edge lists)
+                    if (viewerInitialIndex == -1) {
+                        val activeTitle = when (currentTab) {
+                            0 -> "Photos"
+                            1 -> "Albums"
+                            2 -> "Favorites"
+                            else -> "Settings"
+                        }
+                        Surface(
+                            color = MaterialTheme.colorScheme.background,
+                            border = BorderStroke(
+                                width = if (scrollFraction > 0.1f) 1.dp else 0.dp,
+                                color = MaterialTheme.colorScheme.outline
+                            ),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .statusBarsPadding()
+                                .height((96f - (40f * scrollFraction)).dp)
+                                .align(Alignment.TopCenter)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .padding(horizontal = 16.dp)
+                            ) {
+                                Text(
+                                    text = activeTitle,
+                                    fontSize = (28f - (10f * scrollFraction)).sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onBackground,
+                                    modifier = Modifier
+                                        .align(Alignment.BottomStart)
+                                        .padding(bottom = (12f * (1f - scrollFraction) + 8f).dp)
+                                )
+                                
+                                // App Logo Shutter icon aligned to top bar right side
+                                Box(
+                                    modifier = Modifier
+                                        .align(Alignment.CenterEnd)
+                                        .padding(bottom = 8.dp)
+                                ) {
+                                    Icon(
+                                        painter = painterResource(id = com.pradeep.pixelgrid.R.drawable.ic_launcher_foreground),
+                                        contentDescription = "PixelVault Logo",
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(28.dp)
+                                    )
+                                }
                             }
                         }
                     }

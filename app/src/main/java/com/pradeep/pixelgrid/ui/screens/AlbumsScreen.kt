@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
@@ -20,7 +21,9 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.pradeep.pixelgrid.data.MediaBucket
 import com.pradeep.pixelgrid.data.MediaItem
@@ -31,6 +34,8 @@ fun AlbumsScreen(
     mediaList: List<MediaItem>,
     gridColumns: Int,
     onMediaClick: (List<MediaItem>, Int) -> Unit,
+    topPadding: Dp,
+    onScrollChange: (Float) -> Unit,
     modifier: Modifier = Modifier
 ) {
     var activeBucketName by remember { mutableStateOf<String?>(null) }
@@ -47,7 +52,32 @@ fun AlbumsScreen(
             }.sortedByDescending { it.itemCount }
     }
 
-    // Intercept back button if viewing items inside a specific album
+    // Scroll states for collapsing app bar
+    val foldersListState = rememberLazyGridState()
+    val detailListState = rememberLazyGridState()
+
+    val activeState = if (activeBucketName == null) foldersListState else detailListState
+    val scrollFraction by remember {
+        derivedStateOf {
+            if (activeState.firstVisibleItemIndex == 0) {
+                (activeState.firstVisibleItemScrollOffset.toFloat() / 200f).coerceIn(0f, 1f)
+            } else {
+                1f
+            }
+        }
+    }
+
+    LaunchedEffect(scrollFraction) {
+        if (activeBucketName == null) {
+            onScrollChange(scrollFraction)
+        }
+    }
+
+    LaunchedEffect(activeBucketName) {
+        onScrollChange(0f)
+    }
+
+    // Intercept back handler when viewing album detail
     if (activeBucketName != null) {
         BackHandler {
             activeBucketName = null
@@ -60,43 +90,34 @@ fun AlbumsScreen(
             .background(MaterialTheme.colorScheme.background)
     ) {
         if (activeBucketName == null) {
-            // 1. ALBUMS GRID
-            Column(modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
-                Text(
-                    text = "Albums",
-                    style = MaterialTheme.typography.displayMedium,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.onBackground,
-                    modifier = Modifier.statusBarsPadding().padding(vertical = 12.dp)
-                )
-
-                if (buckets.isEmpty()) {
-                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        Text(
-                            text = "No albums found",
-                            style = MaterialTheme.typography.titleMedium,
-                            color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.6f)
+            // 1. FOLDERS/ALBUMS GRID (No local title, collapsing top padding applied)
+            if (buckets.isEmpty()) {
+                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Text(
+                        text = "No albums found",
+                        style = MaterialTheme.typography.titleMedium,
+                        color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.6f)
+                    )
+                }
+            } else {
+                LazyVerticalGrid(
+                    state = foldersListState,
+                    columns = GridCells.Fixed(2),
+                    horizontalArrangement = Arrangement.spacedBy(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(16.dp),
+                    modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp),
+                    contentPadding = PaddingValues(top = topPadding, bottom = 80.dp)
+                ) {
+                    items(buckets) { bucket ->
+                        AlbumCard(
+                            bucket = bucket,
+                            onClick = { activeBucketName = bucket.name }
                         )
-                    }
-                } else {
-                    LazyVerticalGrid(
-                        columns = GridCells.Fixed(2),
-                        horizontalArrangement = Arrangement.spacedBy(16.dp),
-                        verticalArrangement = Arrangement.spacedBy(16.dp),
-                        modifier = Modifier.fillMaxSize(),
-                        contentPadding = PaddingValues(bottom = 80.dp)
-                    ) {
-                        items(buckets) { bucket ->
-                            AlbumCard(
-                                bucket = bucket,
-                                onClick = { activeBucketName = bucket.name }
-                            )
-                        }
                     }
                 }
             }
         } else {
-            // 2. ALBUM MEDIA LIST
+            // 2. ALBUM DETAIL SCREEN (Standard compact back-button header)
             val albumName = activeBucketName!!
             val albumMedia = remember(mediaList, albumName) {
                 mediaList.filter { it.bucketName == albumName }
@@ -134,6 +155,7 @@ fun AlbumsScreen(
                 }
 
                 LazyVerticalGrid(
+                    state = detailListState,
                     columns = GridCells.Fixed(gridColumns),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -163,50 +185,50 @@ fun AlbumsScreen(
     }
 }
 
+// Album Card view component
 @Composable
-fun AlbumCard(
+private fun AlbumCard(
     bucket: MediaBucket,
     onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val colors = MaterialTheme.colorScheme
-
     ShadcnCard(
         modifier = modifier
             .fillMaxWidth()
             .clickable { onClick() }
     ) {
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .aspectRatio(1.2f)
-                .clip(RoundedCornerShape(6.dp))
-                .background(colors.secondary)
-                .border(1.dp, colors.outline.copy(alpha = 0.5f), RoundedCornerShape(6.dp))
-        ) {
-            AsyncImage(
-                model = bucket.coverUri,
-                contentDescription = bucket.name,
-                modifier = Modifier.fillMaxSize(),
-                contentScale = ContentScale.Crop
+        Column(modifier = Modifier.fillMaxWidth()) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .aspectRatio(1.2f)
+                    .clip(RoundedCornerShape(6.dp))
+                    .background(MaterialTheme.colorScheme.secondary)
+            ) {
+                AsyncImage(
+                    model = bucket.coverUri,
+                    contentDescription = bucket.name,
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = ContentScale.Crop
+                )
+            }
+
+            Spacer(Modifier.height(10.dp))
+
+            Text(
+                text = bucket.name,
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onBackground,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+
+            Text(
+                text = "${bucket.itemCount} items",
+                style = MaterialTheme.typography.labelMedium.copy(fontSize = 12.sp),
+                color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.5f)
             )
         }
-        
-        Spacer(Modifier.height(12.dp))
-        
-        Text(
-            text = bucket.name,
-            style = MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.Bold,
-            color = colors.onBackground,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis
-        )
-        
-        Text(
-            text = "${bucket.itemCount} items",
-            style = MaterialTheme.typography.bodyMedium,
-            color = colors.onBackground.copy(alpha = 0.6f)
-        )
     }
 }

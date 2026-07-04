@@ -7,18 +7,19 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material3.*
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.remember
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
 import com.pradeep.pixelgrid.data.MediaItem
@@ -28,26 +29,34 @@ fun FavoritesScreen(
     mediaList: List<MediaItem>,
     gridColumns: Int,
     onMediaClick: (List<MediaItem>, Int) -> Unit,
+    topPadding: Dp,
+    onScrollChange: (Float) -> Unit,
     modifier: Modifier = Modifier
 ) {
     val favorites = remember(mediaList) {
         mediaList.filter { it.isFavorite }
     }
 
+    val gridState = rememberLazyGridState()
+    val scrollFraction by remember {
+        derivedStateOf {
+            if (gridState.firstVisibleItemIndex == 0) {
+                (gridState.firstVisibleItemScrollOffset.toFloat() / 200f).coerceIn(0f, 1f)
+            } else {
+                1f
+            }
+        }
+    }
+
+    LaunchedEffect(scrollFraction) {
+        onScrollChange(scrollFraction)
+    }
+
     Column(
         modifier = modifier
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.background)
-            .padding(horizontal = 16.dp)
     ) {
-        Text(
-            text = "Favorites",
-            style = MaterialTheme.typography.displayMedium,
-            fontWeight = FontWeight.Bold,
-            color = MaterialTheme.colorScheme.onBackground,
-            modifier = Modifier.statusBarsPadding().padding(vertical = 12.dp)
-        )
-
         if (favorites.isEmpty()) {
             Box(
                 modifier = Modifier
@@ -79,11 +88,12 @@ fun FavoritesScreen(
             }
         } else {
             LazyVerticalGrid(
+                state = gridState,
                 columns = GridCells.Fixed(gridColumns),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
-                modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(bottom = 80.dp)
+                modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp),
+                contentPadding = PaddingValues(top = topPadding, bottom = 80.dp)
             ) {
                 items(favorites) { item ->
                     Box(
@@ -99,17 +109,6 @@ fun FavoritesScreen(
                             contentDescription = item.name,
                             modifier = Modifier.fillMaxSize(),
                             contentScale = ContentScale.Crop
-                        )
-                        
-                        // Heart badge overlay
-                        Icon(
-                            imageVector = Icons.Default.Favorite,
-                            contentDescription = "Favorite",
-                            tint = Color.Red,
-                            modifier = Modifier
-                                .align(Alignment.TopStart)
-                                .padding(8.dp)
-                                .size(16.dp)
                         )
                     }
                 }

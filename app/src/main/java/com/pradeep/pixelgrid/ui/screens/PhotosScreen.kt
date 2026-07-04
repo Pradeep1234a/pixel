@@ -1,6 +1,5 @@
 package com.pradeep.pixelgrid.ui.screens
 
-import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -14,13 +13,10 @@ import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.Favorite
-import androidx.compose.material.icons.filled.FavoriteBorder
-import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -32,6 +28,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
@@ -52,6 +49,8 @@ fun PhotosScreen(
     gridColumns: Int,
     onMediaClick: (List<MediaItem>, Int) -> Unit,
     onRefresh: () -> Unit,
+    topPadding: Dp,
+    onScrollChange: (Float) -> Unit,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -60,6 +59,34 @@ fun PhotosScreen(
     // Selection mode state
     var isSelectionMode by remember { mutableStateOf(false) }
     val selectedItems = remember { mutableStateListOf<MediaItem>() }
+
+    // Scroll state tracking
+    val lazyListState = rememberLazyListState()
+    val scrollFraction by remember {
+        derivedStateOf {
+            if (lazyListState.firstVisibleItemIndex == 0) {
+                (lazyListState.firstVisibleItemScrollOffset.toFloat() / 200f).coerceIn(0f, 1f)
+            } else {
+                1f
+            }
+        }
+    }
+
+    LaunchedEffect(scrollFraction) {
+        // Only trigger scroll updates if not in selection mode (as header gets overlaid)
+        if (!isSelectionMode) {
+            onScrollChange(scrollFraction)
+        }
+    }
+
+    // Reset scroll fraction to 0 if selection mode starts
+    LaunchedEffect(isSelectionMode) {
+        if (isSelectionMode) {
+            onScrollChange(0f)
+        } else {
+            onScrollChange(scrollFraction)
+        }
+    }
 
     // Recoverable security exception launcher for deletions
     val deleteLauncher = rememberLauncherForActivityResult(
@@ -75,7 +102,6 @@ fun PhotosScreen(
     // Reset selection mode if mediaList changes or screen is refreshed
     LaunchedEffect(mediaList) {
         if (selectedItems.isNotEmpty()) {
-            // Keep selected items that still exist in the updated media list
             val currentIds = mediaList.map { it.id }.toSet()
             val toRemove = selectedItems.filter { !currentIds.contains(it.id) }
             selectedItems.removeAll(toRemove)
@@ -94,7 +120,7 @@ fun PhotosScreen(
                     val sender = MediaRepository.deleteMediaItem(context, item)
                     if (sender != null) {
                         requestSender = sender
-                        break // Handle one exception at a time (standard Android Q+ flow)
+                        break
                     }
                 } catch (e: Exception) {
                     e.printStackTrace()
@@ -131,7 +157,7 @@ fun PhotosScreen(
     }
 
     Column(modifier = modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
-        // Selection Mode Header or standard title
+        // Selection Mode Header (Overlays the collapsing header space)
         if (isSelectionMode) {
             Surface(
                 color = MaterialTheme.colorScheme.secondary,
@@ -173,29 +199,6 @@ fun PhotosScreen(
                     }
                 }
             }
-        } else {
-            // Normal top header
-            Row(
-                modifier = Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 16.dp, vertical = 12.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column {
-                    Text(
-                        text = "Photos",
-                        style = MaterialTheme.typography.displayMedium,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onBackground
-                    )
-                    Text(
-                        text = "${mediaList.size} items in total",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.6f)
-                    )
-                }
-                
-                ShadcnBadge(text = "Zinc Style", color = MaterialTheme.colorScheme.primary, textColor = MaterialTheme.colorScheme.onPrimary)
-            }
         }
 
         if (mediaList.isEmpty()) {
@@ -225,9 +228,10 @@ fun PhotosScreen(
             }
         } else {
             LazyColumn(
+                state = lazyListState,
                 modifier = Modifier.fillMaxSize().weight(1f).padding(horizontal = 16.dp),
                 verticalArrangement = Arrangement.spacedBy(16.dp),
-                contentPadding = PaddingValues(bottom = 80.dp)
+                contentPadding = PaddingValues(top = topPadding, bottom = 80.dp)
             ) {
                 groupedMedia.forEach { (dateHeader, items) ->
                     // Sticky Date Header
@@ -290,7 +294,6 @@ fun PhotosScreen(
                                             }
                                         )
                                 ) {
-                                    // Thumbnail Image
                                     AsyncImage(
                                         model = item.uri,
                                         contentDescription = item.name,
@@ -298,66 +301,28 @@ fun PhotosScreen(
                                         contentScale = ContentScale.Crop
                                     )
 
-                                    // Selection checkbox overlay
-                                    if (isSelectionMode) {
-                                        Box(
-                                            modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = if (isSelected) 0.3f else 0.1f))
-                                        )
-                                        
-                                        Icon(
-                                            imageVector = Icons.Default.CheckCircle,
-                                            contentDescription = "Selected",
-                                            tint = if (isSelected) BlueAccent else Color.White.copy(alpha = 0.5f),
-                                            modifier = Modifier.align(Alignment.TopEnd).padding(6.dp).size(20.dp)
-                                        )
-                                    }
-
-                                    // Video Play Overlay and duration
                                     if (item.isVideo) {
                                         Box(
                                             modifier = Modifier
-                                                .align(Alignment.BottomStart)
-                                                .padding(6.dp)
-                                                .clip(RoundedCornerShape(4.dp))
-                                                .background(Color.Black.copy(alpha = 0.6f))
-                                                .padding(horizontal = 4.dp, vertical = 2.dp),
-                                            contentAlignment = Alignment.Center
-                                        ) {
-                                            Row(
-                                                horizontalArrangement = Arrangement.spacedBy(2.dp),
-                                                verticalAlignment = Alignment.CenterVertically
-                                            ) {
-                                                Icon(
-                                                    Icons.Default.PlayArrow,
-                                                    contentDescription = "Video",
-                                                    tint = Color.White,
-                                                    modifier = Modifier.size(10.dp)
-                                                )
-                                                Text(
-                                                    text = formatDuration(item.duration),
-                                                    color = Color.White,
-                                                    style = MaterialTheme.typography.labelMedium.copy(fontSize = 9.sp)
-                                                )
-                                            }
+                                                .fillMaxSize()
+                                                .background(Color.Black.copy(alpha = 0.3f))
+                                        )
+                                        val durationString = remember(item.duration) {
+                                            formatDuration(item.duration)
                                         }
-                                    }
-
-                                    // Favorite badge indicator
-                                    if (item.isFavorite && !isSelectionMode) {
-                                        Icon(
-                                            imageVector = Icons.Default.Favorite,
-                                            contentDescription = "Favorite",
-                                            tint = Color.Red,
+                                        ShadcnBadge(
+                                            text = durationString,
                                             modifier = Modifier
-                                                .align(Alignment.TopStart)
-                                                .padding(6.dp)
-                                                .size(14.dp)
+                                                .align(Alignment.BottomEnd)
+                                                .padding(6.dp),
+                                            color = Color.Black.copy(alpha = 0.6f),
+                                            textColor = Color.White
                                         )
                                     }
                                 }
                             }
 
-                            // Pad row if it has fewer elements than columns
+                            // Pad empty spaces in the row to maintain square grid columns
                             val emptySlots = gridColumns - rowItems.size
                             if (emptySlots > 0) {
                                 repeat(emptySlots) {
@@ -365,7 +330,6 @@ fun PhotosScreen(
                                 }
                             }
                         }
-                        Spacer(modifier = Modifier.height(8.dp))
                     }
                 }
             }
@@ -373,37 +337,33 @@ fun PhotosScreen(
     }
 }
 
-// Format duration from ms to m:ss
+// Helpers
+private fun getHeaderDateString(timestampSeconds: Long): String {
+    val date = Date(timestampSeconds * 1000)
+    val today = Calendar.getInstance()
+    val itemDate = Calendar.getInstance().apply { time = date }
+
+    return when {
+        isSameDay(today, itemDate) -> "Today"
+        isYesterday(today, itemDate) -> "Yesterday"
+        else -> SimpleDateFormat("MMMM d, yyyy", Locale.getDefault()).format(date)
+    }
+}
+
+private fun isSameDay(cal1: Calendar, cal2: Calendar): Boolean {
+    return cal1.get(Calendar.YEAR) == cal2.get(Calendar.YEAR) &&
+           cal1.get(Calendar.DAY_OF_YEAR) == cal2.get(Calendar.DAY_OF_YEAR)
+}
+
+private fun isYesterday(today: Calendar, date: Calendar): Boolean {
+    val yesterday = today.clone() as Calendar
+    yesterday.add(Calendar.DAY_OF_YEAR, -1)
+    return isSameDay(yesterday, date)
+}
+
 private fun formatDuration(durationMs: Long): String {
     val totalSeconds = durationMs / 1000
     val minutes = totalSeconds / 60
     val seconds = totalSeconds % 60
     return String.format(Locale.getDefault(), "%d:%02d", minutes, seconds)
-}
-
-// Convert timestamp to readable date header
-private fun getHeaderDateString(timestampSeconds: Long): String {
-    val date = Date(timestampSeconds * 1000)
-    val now = Calendar.getInstance()
-    val itemCalendar = Calendar.getInstance().apply { time = date }
-
-    return when {
-        // Today
-        now.get(Calendar.YEAR) == itemCalendar.get(Calendar.YEAR) &&
-        now.get(Calendar.DAY_OF_YEAR) == itemCalendar.get(Calendar.DAY_OF_YEAR) -> "Today"
-
-        // Yesterday
-        now.get(Calendar.YEAR) == itemCalendar.get(Calendar.YEAR) &&
-        now.get(Calendar.DAY_OF_YEAR) - 1 == itemCalendar.get(Calendar.DAY_OF_YEAR) -> "Yesterday"
-
-        // This Year, e.g. "June 14"
-        now.get(Calendar.YEAR) == itemCalendar.get(Calendar.YEAR) -> {
-            SimpleDateFormat("MMMM d", Locale.getDefault()).format(date)
-        }
-
-        // Previous Years, e.g. "October 10, 2024"
-        else -> {
-            SimpleDateFormat("MMMM d, yyyy", Locale.getDefault()).format(date)
-        }
-    }
 }

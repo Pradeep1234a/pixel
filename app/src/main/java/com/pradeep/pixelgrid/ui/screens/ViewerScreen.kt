@@ -8,6 +8,7 @@ import android.widget.FrameLayout
 import androidx.annotation.OptIn
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -141,14 +142,23 @@ fun ViewerScreen(
         context.startActivity(Intent.createChooser(intent, "Share Media"))
     }
 
-    // Dynamic animated background color fading between theme background and black fullscreen
+    // Dynamic animated background color fading between dark zinc (UI showing) and black fullscreen
     val targetBgColor = if (showUi) {
-        // Use a premium dark zinc background when UI is visible to focus the image properly, regardless of theme
-        Color(0xFF09090B)
+        Color(0xFF09090B) // Dark Zinc for contrast focus
     } else {
-        Color.Black
+        Color.Black // Pitch Black
     }
     val animatedBgColor by animateColorAsState(targetBgColor, animationSpec = tween(300))
+
+    // Dynamic layout paddings to center image below header / above footer in normal mode, expanding edge-to-edge in fullscreen
+    val statusBarHeight = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
+    val navBarHeight = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+    
+    val targetTopPadding = if (showUi) 56.dp + statusBarHeight else 0.dp
+    val targetBottomPadding = if (showUi) 108.dp + navBarHeight else 0.dp
+    
+    val animatedTopPadding by animateDpAsState(targetTopPadding, animationSpec = tween(300))
+    val animatedBottomPadding by animateDpAsState(targetBottomPadding, animationSpec = tween(300))
 
     // Theme content colors
     val headerColor = if (darkTheme) Color.Black.copy(alpha = 0.8f) else MaterialTheme.colorScheme.surface
@@ -170,25 +180,32 @@ fun ViewerScreen(
         ) { page ->
             val pageItem = mediaList.getOrNull(page)
             if (pageItem != null) {
-                if (pageItem.isVideo) {
-                    VideoPlayer(
-                        uri = pageItem.uri,
-                        autoplay = videoAutoplay && page == pagerState.currentPage,
-                        onTap = { showUi = !showUi },
-                        modifier = Modifier.fillMaxSize()
-                    )
-                } else {
-                    ImageViewer(
-                        uri = pageItem.uri,
-                        name = pageItem.name,
-                        onTap = { showUi = !showUi },
-                        onScaleChanged = { zoomed ->
-                            if (page == pagerState.currentPage) {
-                                isZoomed = zoomed
-                            }
-                        },
-                        modifier = Modifier.fillMaxSize()
-                    )
+                // Image container padded to start below header/above footer in normal mode, expanding to full screen smoothly
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(top = animatedTopPadding, bottom = animatedBottomPadding)
+                ) {
+                    if (pageItem.isVideo) {
+                        VideoPlayer(
+                            uri = pageItem.uri,
+                            autoplay = videoAutoplay && page == pagerState.currentPage,
+                            onTap = { showUi = !showUi },
+                            modifier = Modifier.fillMaxSize()
+                        )
+                    } else {
+                        ImageViewer(
+                            uri = pageItem.uri,
+                            name = pageItem.name,
+                            onTap = { showUi = !showUi },
+                            onScaleChanged = { zoomed ->
+                                if (page == pagerState.currentPage) {
+                                    isZoomed = zoomed
+                                }
+                            },
+                            modifier = Modifier.fillMaxSize()
+                        )
+                    }
                 }
             }
         }
@@ -428,7 +445,7 @@ private fun ImageViewer(
     ) {
         AsyncImage(
             model = uri,
-            name,
+            contentDescription = name,
             modifier = Modifier
                 .fillMaxSize()
                 .graphicsLayer(

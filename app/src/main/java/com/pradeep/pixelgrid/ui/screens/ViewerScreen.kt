@@ -62,6 +62,27 @@ fun ViewerScreen(
     var showUi by remember { mutableStateOf(true) }
     var showInfoDrawer by remember { mutableStateOf(false) }
 
+    // Dynamic system bars configuration for immersive dark theme viewing
+    val view = androidx.compose.ui.platform.LocalView.current
+    if (!view.isInEditMode) {
+        val window = (view.context as android.app.Activity).window
+        DisposableEffect(Unit) {
+            val insetsController = androidx.core.view.WindowCompat.getInsetsController(window, view)
+            val originalLightStatus = insetsController.isAppearanceLightStatusBars
+            val originalLightNav = insetsController.isAppearanceLightNavigationBars
+            
+            // Force dark style (white icons on black backdrop)
+            insetsController.isAppearanceLightStatusBars = false
+            insetsController.isAppearanceLightNavigationBars = false
+            
+            onDispose {
+                // Restore original styling on back
+                insetsController.isAppearanceLightStatusBars = originalLightStatus
+                insetsController.isAppearanceLightNavigationBars = originalLightNav
+            }
+        }
+    }
+
     // Media file sharing intent
     val shareMedia = {
         val intent = Intent().apply {

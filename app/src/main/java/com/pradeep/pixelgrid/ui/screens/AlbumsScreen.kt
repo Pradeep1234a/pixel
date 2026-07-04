@@ -67,7 +67,7 @@ fun AlbumsScreen(
                     style = MaterialTheme.typography.displayMedium,
                     fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.onBackground,
-                    modifier = Modifier.padding(vertical = 12.dp)
+                    modifier = Modifier.statusBarsPadding().padding(vertical = 12.dp)
                 )
 
                 if (buckets.isEmpty()) {
@@ -106,6 +106,7 @@ fun AlbumsScreen(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
+                        .statusBarsPadding()
                         .padding(horizontal = 8.dp, vertical = 12.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {

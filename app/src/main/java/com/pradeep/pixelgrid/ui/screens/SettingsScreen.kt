@@ -42,7 +42,7 @@ fun SettingsScreen(
             style = MaterialTheme.typography.displayMedium,
             fontWeight = FontWeight.Bold,
             color = MaterialTheme.colorScheme.onBackground,
-            modifier = Modifier.padding(vertical = 12.dp)
+            modifier = Modifier.statusBarsPadding().padding(vertical = 12.dp)
         )
 
         Column(

@@ -135,7 +135,7 @@ fun PhotosScreen(
         if (isSelectionMode) {
             Surface(
                 color = MaterialTheme.colorScheme.secondary,
-                modifier = Modifier.fillMaxWidth().height(64.dp),
+                modifier = Modifier.fillMaxWidth().statusBarsPadding().height(64.dp),
                 border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
             ) {
                 Row(
@@ -176,7 +176,7 @@ fun PhotosScreen(
         } else {
             // Normal top header
             Row(
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
+                modifier = Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 16.dp, vertical = 12.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {

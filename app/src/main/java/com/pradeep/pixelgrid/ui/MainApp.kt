@@ -159,7 +159,7 @@ fun MainApp(
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
-                        .padding(paddingValues)
+                        .padding(bottom = paddingValues.calculateBottomPadding())
                 ) {
                     if (isLoading) {
                         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {

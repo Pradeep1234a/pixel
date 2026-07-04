@@ -56,6 +56,7 @@ fun ViewerScreen(
     item: MediaItem,
     onBack: () -> Unit,
     onFavoriteToggle: (MediaItem) -> Unit,
+    videoAutoplay: Boolean = true,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -103,6 +104,7 @@ fun ViewerScreen(
         if (item.isVideo) {
             VideoPlayer(
                 uri = item.uri,
+                autoplay = videoAutoplay,
                 onTap = { showUi = !showUi },
                 modifier = Modifier.fillMaxSize()
             )
@@ -308,6 +310,7 @@ private fun ImageViewer(
 @Composable
 private fun VideoPlayer(
     uri: Uri,
+    autoplay: Boolean,
     onTap: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -317,7 +320,7 @@ private fun VideoPlayer(
             val mediaItem = Media3Item.fromUri(uri)
             setMediaItem(mediaItem)
             prepare()
-            playWhenReady = true
+            playWhenReady = autoplay
         }
     }
 

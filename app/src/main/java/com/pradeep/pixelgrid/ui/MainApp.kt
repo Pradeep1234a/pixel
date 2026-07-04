@@ -4,6 +4,7 @@ import android.Manifest
 import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Build
+import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
@@ -13,6 +14,7 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.Home
@@ -25,19 +27,25 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.pradeep.pixelgrid.data.MediaItem
 import com.pradeep.pixelgrid.data.MediaRepository
+import com.pradeep.pixelgrid.data.UpdateInfo
+import com.pradeep.pixelgrid.data.UpdateManager
 import com.pradeep.pixelgrid.ui.components.ShadcnButton
 import com.pradeep.pixelgrid.ui.components.ShadcnButtonVariant
+import com.pradeep.pixelgrid.ui.components.ShadcnDialog
+import com.pradeep.pixelgrid.ui.components.ShadcnTopBar
 import com.pradeep.pixelgrid.ui.screens.*
 import kotlinx.coroutines.launch
 
 private const val PREFS_NAME = "pixelvault_settings"
 private const val KEY_COLUMNS = "grid_columns"
+private const val KEY_AUTOPLAY = "video_autoplay"
 
 @Composable
 fun MainApp(
@@ -55,13 +63,19 @@ fun MainApp(
     // Persistent columns preference
     val prefs = remember { context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE) }
     var gridColumns by remember { mutableStateOf(prefs.getInt(KEY_COLUMNS, 3)) }
+    var videoAutoplay by remember { mutableStateOf(prefs.getBoolean(KEY_AUTOPLAY, true)) }
 
     // Navigation and screen focus states
-    var currentTab by remember { mutableStateOf(0) } // 0: Photos, 1: Albums, 2: Favorites, 3: Settings
+    var currentTab by remember { mutableStateOf(0) }
     var activeViewerItem by remember { mutableStateOf<MediaItem?>(null) }
 
+    // Update checker states
+    var updateInfo by remember { mutableStateOf<UpdateInfo?>(null) }
+    var downloadProgress by remember { mutableStateOf<Float?>(null) }
+    var downloadedFile by remember { mutableStateOf<java.io.File?>(null) }
+
     // Refresh function to reload MediaStore content
-    val refreshMedia = {
+    val refreshMedia: () -> Unit = {
         if (hasPermission) {
             isLoading = true
             coroutineScope.launch {
@@ -87,10 +101,32 @@ fun MainApp(
         }
     }
 
+    // Manual check updates trigger
+    val triggerManualUpdateCheck: () -> Unit = {
+        isLoading = true
+        coroutineScope.launch {
+            val info = UpdateManager.checkForUpdates(context, isManualCheck = true)
+            isLoading = false
+            if (info != null) {
+                updateInfo = info
+            } else {
+                Toast.makeText(context, "Your app is up to date!", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
     // Initial load
     LaunchedEffect(hasPermission) {
         if (hasPermission) {
             refreshMedia()
+            
+            // Check for updates on startup
+            coroutineScope.launch {
+                val info = UpdateManager.checkForUpdates(context, isManualCheck = false)
+                if (info != null) {
+                    updateInfo = info
+                }
+            }
         }
     }
 
@@ -108,6 +144,21 @@ fun MainApp(
     } else {
         Box(modifier = Modifier.fillMaxSize()) {
             Scaffold(
+                topBar = {
+                    if (activeViewerItem == null) {
+                        ShadcnTopBar(
+                            title = "PixelVault",
+                            navigationIcon = {
+                                Icon(
+                                    painter = painterResource(id = com.pradeep.pixelgrid.R.drawable.ic_launcher_foreground),
+                                    contentDescription = "PixelVault Logo",
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(28.dp)
+                                )
+                            }
+                        )
+                    }
+                },
                 bottomBar = {
                     // Custom navigation bar styled like Shadcn Tablist
                     Surface(
@@ -159,7 +210,10 @@ fun MainApp(
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
-                        .padding(bottom = paddingValues.calculateBottomPadding())
+                        .padding(
+                            top = paddingValues.calculateTopPadding(),
+                            bottom = paddingValues.calculateBottomPadding()
+                        )
                 ) {
                     if (isLoading) {
                         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -193,8 +247,14 @@ fun MainApp(
                                         gridColumns = cols
                                         prefs.edit().putInt(KEY_COLUMNS, cols).apply()
                                     },
+                                    videoAutoplay = videoAutoplay,
+                                    onVideoAutoplayChange = { autoplay ->
+                                        videoAutoplay = autoplay
+                                        prefs.edit().putBoolean(KEY_AUTOPLAY, autoplay).apply()
+                                    },
                                     totalCount = mediaList.size,
-                                    totalSize = totalSize
+                                    totalSize = totalSize,
+                                    onCheckForUpdates = triggerManualUpdateCheck
                                 )
                             }
                         }
@@ -209,18 +269,161 @@ fun MainApp(
                 exit = fadeOut()
             ) {
                 activeViewerItem?.let { item ->
-                    // Re-fetch favorites status on render
                     val favoriteIds = remember(mediaList) { MediaRepository.getFavoriteIds(context) }
                     val currentItemWithFavorite = item.copy(isFavorite = favoriteIds.contains(item.id))
 
                     ViewerScreen(
                         item = currentItemWithFavorite,
                         onBack = { activeViewerItem = null },
+                        videoAutoplay = videoAutoplay,
                         onFavoriteToggle = { clickedItem ->
                             MediaRepository.toggleFavorite(context, clickedItem.id)
-                            refreshMedia() // reload items
+                            refreshMedia()
                         }
                     )
+                }
+            }
+
+            // --- SHADCN UPDATE CHECKER DIALOG ---
+            updateInfo?.let { info ->
+                ShadcnDialog(
+                    onDismissRequest = {
+                        if (downloadProgress == null) {
+                            updateInfo = null
+                            downloadedFile = null
+                        }
+                    },
+                    title = "Update Available",
+                    description = "A new version of PixelVault is ready to download."
+                ) {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(16.dp),
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp)
+                    ) {
+                        // App Logo
+                        Icon(
+                            painter = painterResource(id = com.pradeep.pixelgrid.R.drawable.ic_launcher_foreground),
+                            contentDescription = "PixelVault Logo",
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(64.dp)
+                        )
+
+                        // App Name and Version
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text(
+                                text = "PixelVault",
+                                style = MaterialTheme.typography.titleLarge,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onBackground
+                            )
+                            Text(
+                                text = "New Version: ${info.version}",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.primary,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+
+                        // Changelog scroll box
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(max = 120.dp)
+                                .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(6.dp))
+                                .background(MaterialTheme.colorScheme.secondary.copy(alpha = 0.3f))
+                                .padding(12.dp)
+                        ) {
+                            Text(
+                                text = info.changelog,
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.8f)
+                            )
+                        }
+
+                        // Progress Bar or install status
+                        if (downloadProgress != null) {
+                            val progress = downloadProgress!!
+                            Column(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalArrangement = Arrangement.spacedBy(6.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                Text(
+                                    text = "Downloading APK: ${(progress * 100).toInt()}%",
+                                    style = MaterialTheme.typography.labelLarge,
+                                    color = MaterialTheme.colorScheme.onBackground
+                                )
+                                com.pradeep.pixelgrid.ui.components.ShadcnProgressBar(
+                                    progress = progress,
+                                    modifier = Modifier.fillMaxWidth()
+                                )
+                            }
+                        } else if (downloadedFile != null) {
+                            Text(
+                                text = "Download complete. Ready to install.",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = com.pradeep.pixelgrid.ui.theme.BlueAccent,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+
+                        // Action Buttons
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            if (downloadProgress == null) {
+                                // "Later" / snooze button
+                                ShadcnButton(
+                                    onClick = {
+                                        if (downloadedFile == null && !info.forceShow) {
+                                            UpdateManager.snoozeUpdate(context, info.version)
+                                        }
+                                        updateInfo = null
+                                        downloadedFile = null
+                                    },
+                                    variant = ShadcnButtonVariant.Outline,
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Text("Later")
+                                }
+
+                                // "Download" / "Install" button
+                                ShadcnButton(
+                                    onClick = {
+                                        val file = downloadedFile
+                                        if (file != null) {
+                                            UpdateManager.triggerInstall(context, file)
+                                        } else {
+                                            // Trigger background download
+                                            downloadProgress = 0.0f
+                                            coroutineScope.launch {
+                                                UpdateManager.downloadApk(
+                                                    context = context,
+                                                    downloadUrl = info.downloadUrl,
+                                                    onProgress = { p -> downloadProgress = p },
+                                                    onSuccess = { apk ->
+                                                        downloadProgress = null
+                                                        downloadedFile = apk
+                                                        UpdateManager.triggerInstall(context, apk)
+                                                    },
+                                                    onError = { err ->
+                                                        downloadProgress = null
+                                                        Toast.makeText(context, "Download failed: ${err.message}", Toast.LENGTH_SHORT).show()
+                                                    }
+                                                )
+                                            }
+                                        }
+                                    },
+                                    variant = ShadcnButtonVariant.Primary,
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Text(if (downloadedFile != null) "Install" else "Download")
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }

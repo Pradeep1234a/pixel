@@ -1,5 +1,6 @@
 package com.pradeep.pixelgrid.ui.screens
 
+import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -11,24 +12,33 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.pradeep.pixelgrid.ui.components.ShadcnButton
+import com.pradeep.pixelgrid.ui.components.ShadcnButtonVariant
 import com.pradeep.pixelgrid.ui.components.ShadcnCard
 import com.pradeep.pixelgrid.ui.components.ShadcnTabSwitch
+import coil.annotation.ExperimentalCoilApi
 import java.util.*
 
+@OptIn(ExperimentalCoilApi::class)
 @Composable
 fun SettingsScreen(
     darkTheme: Boolean,
     onThemeChange: (Boolean) -> Unit,
     gridColumns: Int,
     onColumnsChange: (Int) -> Unit,
+    videoAutoplay: Boolean,
+    onVideoAutoplayChange: (Boolean) -> Unit,
     totalCount: Int,
     totalSize: Long,
+    onCheckForUpdates: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val scrollState = rememberScrollState()
+    val context = LocalContext.current
 
     Column(
         modifier = modifier
@@ -47,7 +57,9 @@ fun SettingsScreen(
 
         Column(
             verticalArrangement = Arrangement.spacedBy(16.dp),
-            modifier = Modifier.fillMaxWidth().padding(bottom = 80.dp)
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(bottom = 80.dp)
         ) {
             // --- THEME SELECTOR CARD ---
             ShadcnCard(modifier = Modifier.fillMaxWidth()) {
@@ -109,6 +121,89 @@ fun SettingsScreen(
                     },
                     modifier = Modifier.fillMaxWidth()
                 )
+            }
+
+            // --- PHOTO PREFERENCES CARD ---
+            ShadcnCard(modifier = Modifier.fillMaxWidth()) {
+                Text(
+                    text = "Photos & Playback",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onBackground
+                )
+                Text(
+                    text = "Manage how local media loads and plays",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.6f)
+                )
+                
+                Spacer(Modifier.height(16.dp))
+                
+                // Autoplay Toggle
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1.5f)) {
+                        Text(
+                            text = "Auto-play Videos",
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.onBackground
+                        )
+                        Text(
+                            text = "Start playing video items automatically on load",
+                            style = MaterialTheme.typography.labelMedium.copy(fontSize = 11.sp),
+                            color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.5f)
+                        )
+                    }
+                    
+                    ShadcnTabSwitch(
+                        options = listOf("Off", "On"),
+                        selectedIndex = if (videoAutoplay) 1 else 0,
+                        onOptionSelected = { index -> onVideoAutoplayChange(index == 1) },
+                        modifier = Modifier.weight(1f).height(32.dp)
+                    )
+                }
+
+                Spacer(Modifier.height(16.dp))
+                HorizontalDivider(color = MaterialTheme.colorScheme.outline)
+                Spacer(Modifier.height(16.dp))
+
+                // Cache Cleaning
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1.5f)) {
+                        Text(
+                            text = "Clear Image Cache",
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.onBackground
+                        )
+                        Text(
+                            text = "Free up device storage by purging cached photo thumbnails",
+                            style = MaterialTheme.typography.labelMedium.copy(fontSize = 11.sp),
+                            color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.5f)
+                        )
+                    }
+                    
+                    ShadcnButton(
+                        onClick = {
+                            val loader = coil.Coil.imageLoader(context)
+                            loader.diskCache?.clear()
+                            loader.memoryCache?.clear()
+                            Toast.makeText(context, "Thumbnail cache cleared successfully", Toast.LENGTH_SHORT).show()
+                        },
+                        variant = ShadcnButtonVariant.Outline,
+                        modifier = Modifier.weight(1f).height(36.dp)
+                    ) {
+                        Text("Clear Cache", fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
+                    }
+                }
             }
 
             // --- GALLERY STATS CARD ---
@@ -187,24 +282,40 @@ fun SettingsScreen(
                 )
                 
                 Spacer(Modifier.height(12.dp))
-                Divider(color = MaterialTheme.colorScheme.outline)
+                HorizontalDivider(color = MaterialTheme.colorScheme.outline)
                 Spacer(Modifier.height(12.dp))
 
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text(
-                        text = "App Version",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.5f)
-                    )
-                    Text(
-                        text = "1.0.0 (v1)",
-                        style = MaterialTheme.typography.bodyMedium,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onBackground
-                    )
+                    Column {
+                        Text(
+                            text = "App Version",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.5f)
+                        )
+                        val versionText = try {
+                            context.packageManager.getPackageInfo(context.packageName, 0).versionName ?: "1.0.0"
+                        } catch (e: Exception) {
+                            "1.0.0"
+                        }
+                        Text(
+                            text = "$versionText",
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onBackground
+                        )
+                    }
+
+                    ShadcnButton(
+                        onClick = onCheckForUpdates,
+                        variant = ShadcnButtonVariant.Primary,
+                        modifier = Modifier.height(36.dp)
+                    ) {
+                        Text("Check for Updates", fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
+                    }
                 }
             }
         }

@@ -7,6 +7,8 @@ import android.view.ViewGroup
 import android.widget.FrameLayout
 import androidx.annotation.OptIn
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
@@ -71,12 +73,14 @@ fun ViewerScreen(
     onFavoriteToggle: (MediaItem) -> Unit,
     onDeleteMedia: (MediaItem) -> Unit,
     videoAutoplay: Boolean = true,
+    darkTheme: Boolean = true,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
     var showUi by remember { mutableStateOf(true) }
     var showInfoDrawer by remember { mutableStateOf(false) }
+    var isZoomed by remember { mutableStateOf(false) }
 
     // Set up horizontal pager state
     val pagerState = rememberPagerState(initialPage = initialIndex, pageCount = { mediaList.size })
@@ -92,16 +96,22 @@ fun ViewerScreen(
         if (mediaList.isNotEmpty()) {
             lazyListState.animateScrollToItem(pagerState.currentPage)
         }
+        isZoomed = false // Reset zoom state on page change
     }
 
     // Dynamic system bars configuration to hide/show them in fullscreen mode
     val view = androidx.compose.ui.platform.LocalView.current
     if (!view.isInEditMode) {
         val window = (view.context as android.app.Activity).window
-        DisposableEffect(showUi) {
+        DisposableEffect(showUi, darkTheme) {
             val insetsController = androidx.core.view.WindowCompat.getInsetsController(window, view)
-            insetsController.isAppearanceLightStatusBars = false
-            insetsController.isAppearanceLightNavigationBars = false
+            
+            // Match system theme when UI is visible. If fullscreen (UI hidden), force dark background (white icons)
+            val lightStatus = if (showUi) !darkTheme else false
+            val lightNav = if (showUi) !darkTheme else false
+            
+            insetsController.isAppearanceLightStatusBars = lightStatus
+            insetsController.isAppearanceLightNavigationBars = lightNav
             
             if (showUi) {
                 insetsController.show(androidx.core.view.WindowInsetsCompat.Type.systemBars())
@@ -111,8 +121,11 @@ fun ViewerScreen(
             }
             
             onDispose {
-                // Ensure system bars are restored when leaving the viewer screen
-                insetsController.show(androidx.core.view.WindowInsetsCompat.Type.systemBars())
+                // Restore default theme-based system bar icons when leaving viewer screen
+                val rootController = androidx.core.view.WindowCompat.getInsetsController(window, view)
+                rootController.show(androidx.core.view.WindowInsetsCompat.Type.systemBars())
+                rootController.isAppearanceLightStatusBars = !darkTheme
+                rootController.isAppearanceLightNavigationBars = !darkTheme
             }
         }
     }
@@ -128,14 +141,29 @@ fun ViewerScreen(
         context.startActivity(Intent.createChooser(intent, "Share Media"))
     }
 
+    // Dynamic animated background color fading between theme background and black fullscreen
+    val targetBgColor = if (showUi) {
+        if (darkTheme) Color.Black else MaterialTheme.colorScheme.background
+    } else {
+        Color.Black
+    }
+    val animatedBgColor by animateColorAsState(targetBgColor, animationSpec = tween(300))
+
+    // Theme content colors
+    val headerColor = if (darkTheme) Color.Black.copy(alpha = 0.8f) else MaterialTheme.colorScheme.surface
+    val headerContentColor = if (darkTheme) Color.White else MaterialTheme.colorScheme.onSurface
+    val footerColor = if (darkTheme) Color.Black.copy(alpha = 0.8f) else MaterialTheme.colorScheme.surface
+    val footerContentColor = if (darkTheme) Color.White else MaterialTheme.colorScheme.onSurface
+
     Box(
         modifier = modifier
             .fillMaxSize()
-            .background(Color.Black)
+            .background(animatedBgColor)
     ) {
         // --- HORIZONTAL PAGER CONTENT ---
         HorizontalPager(
             state = pagerState,
+            userScrollEnabled = !isZoomed, // Lock scrolling when active image is zoomed
             modifier = Modifier.fillMaxSize(),
             pageSpacing = 16.dp
         ) { page ->
@@ -153,6 +181,11 @@ fun ViewerScreen(
                         uri = pageItem.uri,
                         name = pageItem.name,
                         onTap = { showUi = !showUi },
+                        onScaleChanged = { zoomed ->
+                            if (page == pagerState.currentPage) {
+                                isZoomed = zoomed
+                            }
+                        },
                         modifier = Modifier.fillMaxSize()
                     )
                 }
@@ -167,21 +200,20 @@ fun ViewerScreen(
             modifier = Modifier.align(Alignment.TopCenter)
         ) {
             Surface(
-                color = Color.Black.copy(alpha = 0.6f),
-                contentColor = Color.White,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .statusBarsPadding()
+                color = headerColor,
+                contentColor = headerContentColor,
+                modifier = Modifier.fillMaxWidth()
             ) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
+                        .statusBarsPadding()
                         .padding(horizontal = 8.dp, vertical = 8.dp),
                     horizontalArrangement = Arrangement.Start,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     IconButton(onClick = onBack) {
-                        Icon(Icons.Default.ArrowBack, contentDescription = "Back", tint = Color.White)
+                        Icon(Icons.Default.ArrowBack, contentDescription = "Back", tint = headerContentColor)
                     }
                     Spacer(Modifier.width(12.dp))
                     Column {
@@ -189,12 +221,12 @@ fun ViewerScreen(
                             text = formatHeaderDate(activeItem.dateAdded),
                             style = MaterialTheme.typography.titleMedium.copy(fontSize = 17.sp),
                             fontWeight = FontWeight.Bold,
-                            color = Color.White
+                            color = headerContentColor
                         )
                         Text(
                             text = formatHeaderTime(activeItem.dateAdded),
                             style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
-                            color = Color.White.copy(alpha = 0.7f)
+                            color = headerContentColor.copy(alpha = 0.7f)
                         )
                     }
                 }
@@ -213,7 +245,7 @@ fun ViewerScreen(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .background(Color.Black.copy(alpha = 0.6f))
+                    .background(footerColor)
                     .padding(vertical = 12.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(12.dp)
@@ -235,7 +267,7 @@ fun ViewerScreen(
                                 .clip(RoundedCornerShape(6.dp))
                                 .border(
                                     width = if (isSelected) 2.dp else 0.dp,
-                                    color = if (isSelected) Color.White else Color.Transparent,
+                                    color = if (isSelected) footerContentColor else Color.Transparent,
                                     shape = RoundedCornerShape(6.dp)
                                 )
                                 .clickable {
@@ -263,22 +295,20 @@ fun ViewerScreen(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     IconButton(onClick = shareMedia) {
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Icon(Icons.Default.Share, contentDescription = "Share", tint = Color.White)
-                        }
+                        Icon(Icons.Default.Share, contentDescription = "Share", tint = footerContentColor)
                     }
                     IconButton(onClick = { onFavoriteToggle(activeItem) }) {
                         Icon(
                             imageVector = if (activeItem.isFavorite) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
                             contentDescription = "Favorite",
-                            tint = if (activeItem.isFavorite) Color.Red else Color.White
+                            tint = if (activeItem.isFavorite) Color.Red else footerContentColor
                         )
                     }
                     IconButton(onClick = { onDeleteMedia(activeItem) }) {
-                        Icon(Icons.Default.Delete, contentDescription = "Delete", tint = Color.White)
+                        Icon(Icons.Default.Delete, contentDescription = "Delete", tint = footerContentColor)
                     }
                     IconButton(onClick = { showInfoDrawer = true }) {
-                        Icon(Icons.Default.Info, contentDescription = "Info", tint = Color.White)
+                        Icon(Icons.Default.Info, contentDescription = "Info", tint = footerContentColor)
                     }
                 }
             }
@@ -364,12 +394,13 @@ private fun InfoRow(label: String, value: String) {
     }
 }
 
-// Pinch-to-zoom interactive ImageViewer
+// Pinch-to-zoom interactive ImageViewer with zoom lock callback
 @Composable
 private fun ImageViewer(
     uri: Uri,
     name: String,
     onTap: () -> Unit,
+    onScaleChanged: (Boolean) -> Unit,
     modifier: Modifier = Modifier
 ) {
     var scale by remember { mutableStateOf(1f) }
@@ -385,8 +416,10 @@ private fun ImageViewer(
                         if (scale > 1f) {
                             scale = 1f
                             offset = Offset.Zero
+                            onScaleChanged(false)
                         } else {
                             scale = 2.5f
+                            onScaleChanged(true)
                         }
                     }
                 )
@@ -394,7 +427,7 @@ private fun ImageViewer(
     ) {
         AsyncImage(
             model = uri,
-            contentDescription = name,
+            name,
             modifier = Modifier
                 .fillMaxSize()
                 .graphicsLayer(
@@ -406,10 +439,13 @@ private fun ImageViewer(
                 .pointerInput(Unit) {
                     detectTransformGestures { _, pan, zoom, _ ->
                         scale = (scale * zoom).coerceIn(1f, 5f)
-                        if (scale > 1f) {
+                        if (scale > 1.05f) {
                             offset += pan
+                            onScaleChanged(true)
                         } else {
+                            scale = 1f
                             offset = Offset.Zero
+                            onScaleChanged(false)
                         }
                     }
                 },

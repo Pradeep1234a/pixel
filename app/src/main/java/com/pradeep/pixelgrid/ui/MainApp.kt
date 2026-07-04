@@ -11,6 +11,9 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
@@ -321,8 +324,8 @@ fun MainApp(
             // --- FULL SCREEN OVERLAY VIEW SCREEN ---
             AnimatedVisibility(
                 visible = viewerInitialIndex != -1,
-                enter = fadeIn(),
-                exit = fadeOut()
+                enter = fadeIn(animationSpec = tween(250)) + slideInVertically(initialOffsetY = { it / 3 }, animationSpec = tween(250)),
+                exit = fadeOut(animationSpec = tween(200)) + slideOutVertically(targetOffsetY = { it / 3 }, animationSpec = tween(200))
             ) {
                 if (viewerInitialIndex != -1) {
                     val favoriteIds = remember(mediaList) { MediaRepository.getFavoriteIds(context) }
@@ -334,6 +337,7 @@ fun MainApp(
                         initialIndex = viewerInitialIndex,
                         onBack = { viewerInitialIndex = -1 },
                         videoAutoplay = videoAutoplay,
+                        darkTheme = darkTheme,
                         onFavoriteToggle = { clickedItem ->
                             MediaRepository.toggleFavorite(context, clickedItem.id)
                             refreshMedia()

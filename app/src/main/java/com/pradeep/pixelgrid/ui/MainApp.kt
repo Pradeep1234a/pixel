@@ -14,6 +14,7 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
@@ -328,47 +329,60 @@ fun MainApp(
                             2 -> "Favorites"
                             else -> "Settings"
                         }
-                        Surface(
-                            color = MaterialTheme.colorScheme.background,
-                            border = BorderStroke(
-                                width = if (scrollFraction > 0.1f) 1.dp else 0.dp,
-                                color = MaterialTheme.colorScheme.outline
-                            ),
+                        val statusBarHeight = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
+                        val totalHeaderHeight = statusBarHeight + (96f - (40f * scrollFraction)).dp
+
+                        Column(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .statusBarsPadding()
-                                .height((96f - (40f * scrollFraction)).dp)
                                 .align(Alignment.TopCenter)
                         ) {
-                            Box(
+                            Surface(
+                                color = MaterialTheme.colorScheme.background,
                                 modifier = Modifier
-                                    .fillMaxSize()
-                                    .padding(horizontal = 16.dp)
+                                    .fillMaxWidth()
+                                    .height(totalHeaderHeight)
                             ) {
-                                Text(
-                                    text = activeTitle,
-                                    fontSize = (28f - (10f * scrollFraction)).sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = MaterialTheme.colorScheme.onBackground,
-                                    modifier = Modifier
-                                        .align(Alignment.BottomStart)
-                                        .padding(bottom = (12f * (1f - scrollFraction) + 8f).dp)
-                                )
-                                
-                                // App Logo Shutter icon aligned to top bar right side
                                 Box(
                                     modifier = Modifier
-                                        .align(Alignment.CenterEnd)
-                                        .padding(bottom = 8.dp)
+                                        .fillMaxSize()
+                                        .statusBarsPadding()
+                                        .padding(horizontal = 16.dp)
                                 ) {
-                                    Icon(
-                                        painter = painterResource(id = com.pradeep.pixelgrid.R.drawable.ic_launcher_foreground),
-                                        contentDescription = "PixelVault Logo",
-                                        tint = MaterialTheme.colorScheme.primary,
-                                        modifier = Modifier.size(28.dp)
+                                    Text(
+                                        text = activeTitle,
+                                        fontSize = (28f - (10f * scrollFraction)).sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.onBackground,
+                                        modifier = Modifier
+                                            .align(Alignment.BottomStart)
+                                            .padding(bottom = (12f + (4f * scrollFraction)).dp)
                                     )
+
+                                    Box(
+                                        modifier = Modifier
+                                            .align(Alignment.TopEnd)
+                                            .height(56.dp),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Icon(
+                                            painter = painterResource(id = com.pradeep.pixelgrid.R.drawable.ic_launcher_foreground),
+                                            contentDescription = "PixelVault Logo",
+                                            tint = MaterialTheme.colorScheme.primary,
+                                            modifier = Modifier.size(28.dp)
+                                        )
+                                    }
                                 }
                             }
+
+                            val dividerAlpha by animateFloatAsState(
+                                targetValue = if (scrollFraction > 0.1f) 1f else 0f,
+                                animationSpec = tween(150)
+                            )
+                            HorizontalDivider(
+                                color = MaterialTheme.colorScheme.outline.copy(alpha = dividerAlpha),
+                                modifier = Modifier.fillMaxWidth()
+                            )
                         }
                     }
                 }

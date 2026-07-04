@@ -29,10 +29,12 @@ import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
@@ -213,6 +215,11 @@ fun MainApp(
             permissionLauncher.launch(permissions)
         }
     } else {
+        val settingsPrefs = remember { context.getSharedPreferences("pixelvault_settings", Context.MODE_PRIVATE) }
+        var isBetaApproved by remember { 
+            mutableStateOf(settingsPrefs.getBoolean("is_beta_approved", false)) 
+        }
+
         var scrollFraction by remember { mutableStateOf(0f) }
 
         LaunchedEffect(currentTab) {
@@ -227,8 +234,113 @@ fun MainApp(
             modifier = Modifier
                 .fillMaxSize()
         ) {
-            Scaffold(
-                topBar = {},
+            if (UpdateManager.isBetaBuild(context) && !isBetaApproved) {
+                // Restrict beta builds to registered approved testers using a key gate
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(MaterialTheme.colorScheme.background)
+                        .padding(24.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(16.dp),
+                        modifier = Modifier.fillMaxWidth(0.85f)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(64.dp)
+                                .clip(RoundedCornerShape(16.dp))
+                                .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.1f)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Lock,
+                                contentDescription = "Access Locked",
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(32.dp)
+                            )
+                        }
+
+                        Text(
+                            text = "Beta Access Restricted",
+                            style = MaterialTheme.typography.headlineSmall,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onBackground
+                        )
+
+                        Text(
+                            text = "This build contains experimental features and is restricted to approved testers. Enter your activation code to unlock.",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.6f),
+                            textAlign = TextAlign.Center
+                        )
+
+                        Spacer(modifier = Modifier.height(8.dp))
+
+                        var activationInput by remember { mutableStateOf("") }
+                        var showError by remember { mutableStateOf(false) }
+
+                        OutlinedTextField(
+                            value = activationInput,
+                            onValueChange = { 
+                                activationInput = it 
+                                showError = false
+                            },
+                            placeholder = { Text("Enter Tester Activation Code") },
+                            isError = showError,
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true,
+                            shape = RoundedCornerShape(8.dp)
+                        )
+
+                        if (showError) {
+                            Text(
+                                text = "Invalid code. Please contact the administrator.",
+                                color = MaterialTheme.colorScheme.error,
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.height(8.dp))
+
+                        ShadcnButton(
+                            onClick = {
+                                if (activationInput.trim().equals("PIXEL-BETA", ignoreCase = true)) {
+                                    isBetaApproved = true
+                                    settingsPrefs.edit().putBoolean("is_beta_approved", true).apply()
+                                    Toast.makeText(context, "Beta access activated!", Toast.LENGTH_SHORT).show()
+                                } else {
+                                    showError = true
+                                }
+                            },
+                            variant = ShadcnButtonVariant.Primary,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text("Activate Beta Access")
+                        }
+
+                        ShadcnButton(
+                            onClick = {
+                                val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                                val clip = android.content.ClipData.newPlainText(
+                                    "Beta Request",
+                                    "Hello, please approve my beta tester access request for package com.pradeep.pixelgrid."
+                                )
+                                clipboard.setPrimaryClip(clip)
+                                Toast.makeText(context, "Request template copied to clipboard!", Toast.LENGTH_SHORT).show()
+                            },
+                            variant = ShadcnButtonVariant.Outline,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text("Request Access Code")
+                        }
+                    }
+                }
+            } else {
+                Scaffold(
+                    topBar = {},
                 bottomBar = {
                     if (viewerInitialIndex == -1 && !isSelectionActive) {
                         Surface(
@@ -682,6 +794,7 @@ fun MainApp(
                         }
                     }
                 }
+            }
             }
         }
     }

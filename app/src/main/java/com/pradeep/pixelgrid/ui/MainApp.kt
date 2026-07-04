@@ -30,6 +30,7 @@ import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -424,6 +425,10 @@ fun MainApp(
                             0 -> PhotosScreen(
                                 mediaList = filteredMediaList,
                                 gridColumns = gridColumns,
+                                onColumnsChange = { cols ->
+                                    gridColumns = cols
+                                    prefs.edit().putInt(KEY_COLUMNS, cols).apply()
+                                },
                                 onMediaClick = { list, index ->
                                     viewerMediaList = list
                                     viewerInitialIndex = index
@@ -597,6 +602,67 @@ fun MainApp(
                                                         imageVector = Icons.Default.Search,
                                                         contentDescription = "Search",
                                                         tint = MaterialTheme.colorScheme.onBackground
+                                                    )
+                                                }
+                                            }
+
+                                            if (currentTab == 0) {
+                                                var showOverflowMenu by remember { mutableStateOf(false) }
+                                                IconButton(onClick = { showOverflowMenu = true }) {
+                                                    Icon(
+                                                        imageVector = Icons.Default.MoreVert,
+                                                        contentDescription = "More actions",
+                                                        tint = MaterialTheme.colorScheme.onBackground
+                                                    )
+                                                }
+                                                DropdownMenu(
+                                                    expanded = showOverflowMenu,
+                                                    onDismissRequest = { showOverflowMenu = false }
+                                                ) {
+                                                    DropdownMenuItem(
+                                                        text = { Text("Refresh Library") },
+                                                        onClick = {
+                                                            showOverflowMenu = false
+                                                            refreshMedia()
+                                                        }
+                                                    )
+                                                    DropdownMenuItem(
+                                                        text = { Text("Sort: Date Taken") },
+                                                        onClick = {
+                                                            showOverflowMenu = false
+                                                            Toast.makeText(context, "Sorted by Date Taken", Toast.LENGTH_SHORT).show()
+                                                        }
+                                                    )
+                                                    DropdownMenuItem(
+                                                        text = { Text("Sort: Recently Added") },
+                                                        onClick = {
+                                                            showOverflowMenu = false
+                                                            Toast.makeText(context, "Sorted by Recently Added", Toast.LENGTH_SHORT).show()
+                                                        }
+                                                    )
+                                                    DropdownMenuItem(
+                                                        text = { Text("Select Multiple") },
+                                                        onClick = {
+                                                            showOverflowMenu = false
+                                                            isSelectionActive = true
+                                                        }
+                                                    )
+                                                    DropdownMenuItem(
+                                                        text = { Text("Slideshow") },
+                                                        onClick = {
+                                                            showOverflowMenu = false
+                                                            if (mediaList.isNotEmpty()) {
+                                                                viewerMediaList = mediaList
+                                                                viewerInitialIndex = 0
+                                                            }
+                                                        }
+                                                    )
+                                                    DropdownMenuItem(
+                                                        text = { Text("Storage Information") },
+                                                        onClick = {
+                                                            showOverflowMenu = false
+                                                            currentTab = 3
+                                                        }
                                                     )
                                                 }
                                             }

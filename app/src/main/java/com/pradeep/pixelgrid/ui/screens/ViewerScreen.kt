@@ -58,6 +58,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
@@ -83,6 +86,11 @@ import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import coil.request.videoFrameMillis
 import com.pradeep.pixelgrid.data.MediaItem
+import com.pradeep.pixelgrid.data.RectBounds
+import androidx.compose.foundation.ScrollState
+import androidx.compose.runtime.mutableStateMapOf
+import androidx.compose.ui.layout.LayoutCoordinates
+import androidx.compose.ui.layout.positionInWindow
 import com.pradeep.pixelgrid.ui.components.ShadcnCard
 import java.text.SimpleDateFormat
 import java.util.*
@@ -104,6 +112,7 @@ fun ViewerScreen(
     onBack: () -> Unit,
     onFavoriteToggle: (MediaItem) -> Unit,
     onDeleteMedia: (MediaItem) -> Unit,
+    clickedBounds: RectBounds? = null,
     videoAutoplay: Boolean = true,
     darkTheme: Boolean = true,
     modifier: Modifier = Modifier
@@ -114,13 +123,14 @@ fun ViewerScreen(
     var showUi by remember { mutableStateOf(true) }
     var showInfoDrawer by remember { mutableStateOf(false) }
     var isZoomed by remember { mutableStateOf(false) }
-    var dragDismissFraction by remember { mutableStateOf(0f) }
+    var verticalOffsetY by remember { mutableStateOf(0f) }
+    val dragDismissFraction by remember {
+        derivedStateOf { (abs(verticalOffsetY) / 1000f).coerceIn(0f, 1f) }
+    }
 
-    // Exit transition states for buttery motion on close/back press
+    // Exit transition progress (1f to 0f) for shared-element bounds anim
     var isExiting by remember { mutableStateOf(false) }
-    var exitOffsetY by remember { mutableStateOf(0f) }
-    var exitScale by remember { mutableStateOf(1f) }
-    var exitAlpha by remember { mutableStateOf(1f) }
+    val exitProgress = remember { Animatable(1f) }
 
     // Grid-to-detail shared-element expansion progress
     val enterProgress = remember { Animatable(0f) }
@@ -137,58 +147,48 @@ fun ViewerScreen(
     LaunchedEffect(isExiting) {
         if (isExiting) {
             showUi = false
-            showInfoDrawer = false
-            val animOffset = Animatable(exitOffsetY)
-            val animScale = Animatable(exitScale)
-            val animAlpha = Animatable(exitAlpha)
-            
             coroutineScope.launch {
-                animOffset.animateTo(
-                    targetValue = exitOffsetY + 900f, // slide down offscreen
-                    animationSpec = tween(durationMillis = 260, easing = FastOutSlowInEasing)
-                ) {
-                    exitOffsetY = value
+                androidx.compose.animation.core.animate(
+                    initialValue = verticalOffsetY,
+                    targetValue = 0f,
+                    animationSpec = tween(durationMillis = 280, easing = FastOutSlowInEasing)
+                ) { value, _ ->
+                    verticalOffsetY = value
                 }
             }
-            coroutineScope.launch {
-                animScale.animateTo(
-                    targetValue = 0.82f, // scale down
-                    animationSpec = tween(durationMillis = 260, easing = FastOutSlowInEasing)
-                ) {
-                    exitScale = value
-                }
-            }
-            coroutineScope.launch {
-                animAlpha.animateTo(
-                    targetValue = 0f, // fade out
-                    animationSpec = tween(durationMillis = 240, easing = LinearEasing)
-                ) {
-                    exitAlpha = value
-                }
-            }
-            delay(270)
+            exitProgress.animateTo(
+                targetValue = 0f,
+                animationSpec = tween(durationMillis = 280, easing = FastOutSlowInEasing)
+            )
             onBack()
-        }
-    }
-
-    // Intercept system back button/gesture to prevent app exit, returning to grid instead
-    BackHandler(enabled = true) {
-        if (showInfoDrawer) {
-            showInfoDrawer = false
-        } else {
-            isExiting = true
         }
     }
 
     // Set up horizontal pager state
     val pagerState = rememberPagerState(initialPage = initialIndex, pageCount = { mediaList.size })
 
+    // Track scroll state for each page item's details view dynamically
+    val pageScrollStates = remember { mutableStateMapOf<Int, ScrollState>() }
+    val activeScrollState = pageScrollStates.getOrPut(pagerState.currentPage) { ScrollState(0) }
+
+    // Intercept back button: scroll details back to top first, then trigger exit transition
+    BackHandler(enabled = true) {
+        if (activeScrollState.value > 0) {
+            coroutineScope.launch {
+                activeScrollState.animateScrollTo(0, tween(300))
+            }
+        } else {
+            isExiting = true
+        }
+    }
+
     // Find the currently active item
     val activeItem = mediaList.getOrNull(pagerState.currentPage) ?: return
 
-    // Reset zoom on page change
+    // Reset zoom and vertical drag offset on page change
     LaunchedEffect(pagerState.currentPage) {
         isZoomed = false
+        verticalOffsetY = 0f
     }
 
     // Dynamic system bars configuration to hide/show them in fullscreen mode
@@ -272,7 +272,13 @@ fun ViewerScreen(
         Color.Black // Pitch Black
     }
     val animatedBgColor by animateColorAsState(targetBgColor, animationSpec = tween(300))
-    val finalBgColor = animatedBgColor.copy(alpha = ((1f - dragDismissFraction) * exitAlpha).coerceIn(0f, 1f))
+    val currentProgress = enterProgress.value * exitProgress.value * (1f - dragDismissFraction)
+    val finalBgColor = animatedBgColor.copy(alpha = currentProgress.coerceIn(0f, 1f))
+
+    // Screen dimensions in pixels for shared-element bounds math
+    val configuration = LocalConfiguration.current
+    val screenWidthPx = with(density) { configuration.screenWidthDp.dp.toPx() }
+    val screenHeightPx = with(density) { configuration.screenHeightDp.dp.toPx() }
 
     // Theme content colors: overlays are transparent to let photo show edge-to-edge behind them
     val headerColor = Color.Transparent
@@ -288,108 +294,201 @@ fun ViewerScreen(
         // --- HORIZONTAL PAGER CONTENT ---
         HorizontalPager(
             state = pagerState,
-            userScrollEnabled = !isZoomed && !showInfoDrawer, // Lock scrolling when active image is zoomed or details sheet is open
+            userScrollEnabled = !isZoomed && activeScrollState.value == 0, // Lock horizontal paging when zoomed or scrolled into details
             modifier = Modifier.fillMaxSize(),
             pageSpacing = 16.dp
         ) { page ->
             val pageItem = mediaList.getOrNull(page)
             if (pageItem != null) {
-                var verticalOffsetY by remember { mutableStateOf(0f) }
+                val scrollState = pageScrollStates.getOrPut(page) { ScrollState(0) }
+                val configuration = LocalConfiguration.current
+                val screenHeight = configuration.screenHeightDp.dp
 
-                // Image container remains locked in full screen bounds (zero layout shifts on UI changes)
-                // Added vertical swipe-to-dismiss (drag down) and swipe-to-info (drag up) gestures
-                Box(
+                val nestedScrollConnection = remember(isZoomed, page) {
+                    object : NestedScrollConnection {
+                        override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
+                            if (isZoomed || page != pagerState.currentPage) return Offset.Zero
+                            if (verticalOffsetY > 0f) {
+                                val newOffset = verticalOffsetY + available.y
+                                return if (newOffset > 0f) {
+                                    verticalOffsetY = newOffset
+                                    Offset(0f, available.y)
+                                } else {
+                                    val consumedY = -verticalOffsetY
+                                    verticalOffsetY = 0f
+                                    Offset(0f, consumedY)
+                                }
+                            }
+                            return Offset.Zero
+                        }
+
+                        override fun onPostScroll(
+                            consumed: Offset,
+                            available: Offset,
+                            source: NestedScrollSource
+                        ): Offset {
+                            if (isZoomed || page != pagerState.currentPage) return Offset.Zero
+                            if (available.y > 0f && scrollState.value == 0) {
+                                verticalOffsetY += available.y
+                                return Offset(0f, available.y)
+                            }
+                            return Offset.Zero
+                        }
+                    }
+                }
+
+                Column(
                     modifier = Modifier
                         .fillMaxSize()
-                        .pointerInput(isZoomed) {
-                            if (!isZoomed) {
-                                detectVerticalDragGestures(
-                                    onVerticalDrag = { change, dragAmount ->
-                                        change.consume()
-                                        verticalOffsetY += dragAmount
-                                        dragDismissFraction = (abs(verticalOffsetY) / 1000f).coerceIn(0f, 1f)
-                                    },
-                                    onDragEnd = {
-                                        if (verticalOffsetY > 220f) {
-                                            isExiting = true // Trigger smooth exit animation instead of jumping
-                                        } else if (verticalOffsetY < -220f) {
-                                            showInfoDrawer = true
-                                            coroutineScope.launch {
-                                                androidx.compose.animation.core.animate(
-                                                    initialValue = verticalOffsetY,
-                                                    targetValue = 0f,
-                                                    animationSpec = spring(stiffness = Spring.StiffnessMedium)
-                                                ) { value, _ ->
-                                                    verticalOffsetY = value
-                                                    dragDismissFraction = (abs(value) / 1000f).coerceIn(0f, 1f)
+                        .nestedScroll(nestedScrollConnection)
+                        .verticalScroll(scrollState)
+                        .pointerInput(isZoomed, page) {
+                            if (!isZoomed && page == pagerState.currentPage) {
+                                awaitPointerEventScope {
+                                    while (true) {
+                                        val event = awaitPointerEvent()
+                                        val anyPressed = event.changes.any { it.pressed }
+                                        if (!anyPressed && verticalOffsetY > 0f) {
+                                            if (verticalOffsetY > 220f) {
+                                                isExiting = true
+                                            } else {
+                                                coroutineScope.launch {
+                                                    androidx.compose.animation.core.animate(
+                                                        initialValue = verticalOffsetY,
+                                                        targetValue = 0f,
+                                                        animationSpec = spring(stiffness = Spring.StiffnessMedium)
+                                                    ) { value, _ ->
+                                                        verticalOffsetY = value
+                                                    }
                                                 }
-                                            }
-                                        } else {
-                                            coroutineScope.launch {
-                                                androidx.compose.animation.core.animate(
-                                                    initialValue = verticalOffsetY,
-                                                    targetValue = 0f,
-                                                    animationSpec = spring(stiffness = Spring.StiffnessMedium)
-                                                ) { value, _ ->
-                                                    verticalOffsetY = value
-                                                    dragDismissFraction = (abs(value) / 1000f).coerceIn(0f, 1f)
-                                                }
-                                            }
-                                        }
-                                    },
-                                    onDragCancel = {
-                                        coroutineScope.launch {
-                                            androidx.compose.animation.core.animate(
-                                                initialValue = verticalOffsetY,
-                                                targetValue = 0f,
-                                                animationSpec = spring(stiffness = Spring.StiffnessMedium)
-                                              ) { value, _ ->
-                                                verticalOffsetY = value
-                                                dragDismissFraction = (abs(value) / 1000f).coerceIn(0f, 1f)
                                             }
                                         }
                                     }
-                                )
+                                }
                             }
                         }
-                        .graphicsLayer {
-                            // Calculate current page scrolling translation offset
-                            val pageOffset = ((pagerState.currentPage - page) + pagerState.currentPageOffsetFraction)
-                            
-                            translationY = verticalOffsetY + exitOffsetY
-                            
-                            // 1. Combine drag-to-dismiss scale, exit transition scale, horizontal pager swipe scale, and enter progress scale
-                            val dragScale = (1f - (abs(verticalOffsetY) / 3000f)).coerceIn(0.85f, 1f)
-                            val pagerScale = 1f - (abs(pageOffset) * 0.12f).coerceIn(0f, 0.12f) // smooth scale down as page moves away
-                            val enterScale = 0.65f + (0.35f * enterProgress.value) // expand from center coordinates
-                            val finalScale = dragScale * exitScale * pagerScale * enterScale
-                            scaleX = finalScale
-                            scaleY = finalScale
-                            
-                            // 2. Combine swipe-down drag opacity, exit animation fade, horizontal swipe page fade, and enter fade
-                            val pagerAlpha = 1f - (abs(pageOffset) * 0.45f).coerceIn(0f, 0.45f) // smooth fade out as page moves away
-                            alpha = exitAlpha * (1f - dragDismissFraction) * pagerAlpha * enterProgress.value
-                        }
                 ) {
-                    if (pageItem.isVideo) {
-                        VideoPlayer(
-                            uri = pageItem.uri,
-                            autoplay = videoAutoplay && page == pagerState.currentPage,
-                            onTap = { showUi = !showUi },
-                            modifier = Modifier.fillMaxSize()
-                        )
-                    } else {
-                        ImageViewer(
-                            uri = pageItem.uri,
-                            name = pageItem.name,
-                            onTap = { showUi = !showUi },
-                            onScaleChanged = { zoomed ->
-                                if (page == pagerState.currentPage) {
-                                    isZoomed = zoomed
+                    // 1. Fullscreen Image/Video box container
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(screenHeight)
+                            .graphicsLayer {
+                                val pageOffset = ((pagerState.currentPage - page) + pagerState.currentPageOffsetFraction)
+                                
+                                // Calculate dynamic entry/exit shared bounds transition!
+                                if (clickedBounds != null && page == pagerState.currentPage) {
+                                    val thumbCenterX = clickedBounds.left.toFloat() + clickedBounds.width.toFloat() / 2f
+                                    val thumbCenterY = clickedBounds.top.toFloat() + clickedBounds.height.toFloat() / 2f
+                                    val screenCenterX = screenWidthPx / 2f
+                                    val screenCenterY = screenHeightPx / 2f
+                                    
+                                    val targetTranslationX = thumbCenterX - screenCenterX
+                                    val targetTranslationY = thumbCenterY - screenCenterY
+                                    
+                                    val targetScale = clickedBounds.width.toFloat() / screenWidthPx
+                                    val p = currentProgress
+                                    val finalScale = targetScale + (1f - targetScale) * p
+                                    
+                                    scaleX = finalScale
+                                    scaleY = finalScale
+                                    translationX = targetTranslationX * (1f - p)
+                                    translationY = (targetTranslationY * (1f - p)) + verticalOffsetY
+                                } else {
+                                    // Fallback
+                                    translationY = verticalOffsetY
+                                    val dragScale = (1f - (abs(verticalOffsetY) / 3000f)).coerceIn(0.85f, 1f)
+                                    val pagerScale = 1f - (abs(pageOffset) * 0.12f).coerceIn(0f, 0.12f)
+                                    val enterScale = 0.65f + (0.35f * enterProgress.value)
+                                    val finalScale = dragScale * exitProgress.value * pagerScale * enterScale
+                                    scaleX = finalScale
+                                    scaleY = finalScale
                                 }
-                            },
-                            modifier = Modifier.fillMaxSize()
+                                
+                                val pagerAlpha = 1f - (abs(pageOffset) * 0.45f).coerceIn(0f, 0.45f)
+                                alpha = (1f - dragDismissFraction) * pagerAlpha * enterProgress.value * exitProgress.value
+                            }
+                    ) {
+                        if (pageItem.isVideo) {
+                            VideoPlayer(
+                                uri = pageItem.uri,
+                                autoplay = videoAutoplay && page == pagerState.currentPage,
+                                onTap = { showUi = !showUi },
+                                modifier = Modifier.fillMaxSize()
+                            )
+                        } else {
+                            ImageViewer(
+                                uri = pageItem.uri,
+                                name = pageItem.name,
+                                onTap = { showUi = !showUi },
+                                onScaleChanged = { zoomed ->
+                                    if (page == pagerState.currentPage) {
+                                        isZoomed = zoomed
+                                    }
+                                },
+                                modifier = Modifier.fillMaxSize()
+                            )
+                        }
+                    }
+
+                    // 2. Google Photos Style details section
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(Color(0xFF1E1E22))
+                            .padding(horizontal = 24.dp, vertical = 28.dp),
+                        verticalArrangement = Arrangement.spacedBy(24.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(width = 36.dp, height = 4.dp)
+                                .background(Color.White.copy(alpha = 0.2f), RoundedCornerShape(2.dp))
+                                .align(Alignment.CenterHorizontally)
                         )
+
+                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Text(
+                                text = SimpleDateFormat("EEEE, MMMM d, yyyy", Locale.getDefault()).format(Date(pageItem.dateAdded * 1000)),
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White
+                            )
+                            Text(
+                                text = SimpleDateFormat("h:mm a", Locale.getDefault()).format(Date(pageItem.dateAdded * 1000)),
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = Color.White.copy(alpha = 0.6f)
+                            )
+                        }
+
+                        HorizontalDivider(color = Color.White.copy(alpha = 0.08f))
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(16.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Info,
+                                contentDescription = "Details",
+                                tint = Color.White.copy(alpha = 0.6f),
+                                modifier = Modifier.size(24.dp)
+                            )
+                            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                    Text("Title", style = MaterialTheme.typography.labelSmall, color = Color.White.copy(alpha = 0.4f))
+                                    Text(pageItem.name, style = MaterialTheme.typography.bodyMedium, color = Color.White, fontWeight = FontWeight.SemiBold)
+                                }
+                                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                    Text("Details", style = MaterialTheme.typography.labelSmall, color = Color.White.copy(alpha = 0.4f))
+                                    val sizeMB = String.format(Locale.getDefault(), "%.2f MB", pageItem.size / (1024f * 1024f))
+                                    val resString = if (pageItem.width > 0 && pageItem.height > 0) "${pageItem.width} × ${pageItem.height}" else ""
+                                    Text("$sizeMB  •  $resString  •  ${pageItem.mimeType.substringAfter("/")}", style = MaterialTheme.typography.bodyMedium, color = Color.White)
+                                }
+                                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                    Text("Path", style = MaterialTheme.typography.labelSmall, color = Color.White.copy(alpha = 0.4f))
+                                    Text(pageItem.path, style = MaterialTheme.typography.bodySmall, color = Color.White.copy(alpha = 0.8f))
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -403,8 +502,9 @@ fun ViewerScreen(
             modifier = Modifier
                 .align(Alignment.TopCenter)
                 .graphicsLayer {
-                    alpha = (1f - dragDismissFraction * 3f).coerceIn(0f, 1f)
-                    translationY = -dragDismissFraction * 150f
+                    val scrollFadeAlpha = (1f - activeScrollState.value.toFloat() / 300f).coerceIn(0f, 1f)
+                    alpha = ((1f - dragDismissFraction * 3f) * scrollFadeAlpha).coerceIn(0f, 1f)
+                    translationY = -dragDismissFraction * 150f - (activeScrollState.value.toFloat() * 0.5f).coerceAtMost(150f)
                 }
         ) {
             Surface(
@@ -443,15 +543,16 @@ fun ViewerScreen(
 
         // --- BOTTOM PANEL OVERLAY (Action Bar & Lens Chip) ---
         AnimatedVisibility(
-            visible = showUi && !showInfoDrawer,
+            visible = showUi,
             enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
             exit = slideOutVertically(targetOffsetY = { it }) + fadeOut(),
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .navigationBarsPadding()
                 .graphicsLayer {
-                    alpha = (1f - dragDismissFraction * 3f).coerceIn(0f, 1f)
-                    translationY = dragDismissFraction * 150f
+                    val scrollFadeAlpha = (1f - activeScrollState.value.toFloat() / 300f).coerceIn(0f, 1f)
+                    alpha = ((1f - dragDismissFraction * 3f) * scrollFadeAlpha).coerceIn(0f, 1f)
+                    translationY = dragDismissFraction * 150f + (activeScrollState.value.toFloat() * 0.5f).coerceAtMost(150f)
                 }
         ) {
             Column(
@@ -634,7 +735,11 @@ fun ViewerScreen(
 
                     // Info Button (circular translucent)
                     IconButton(
-                        onClick = { showInfoDrawer = true },
+                        onClick = {
+                            coroutineScope.launch {
+                                activeScrollState.animateScrollTo(activeScrollState.maxValue, tween(400))
+                            }
+                        },
                         modifier = Modifier
                             .size(46.dp)
                             .background(Color.Black.copy(alpha = 0.5f), CircleShape)
@@ -645,112 +750,6 @@ fun ViewerScreen(
                 }
             }
         }
-
-        // --- GOOGLE PHOTOS STYLE DETAILS SHEET ---
-        val sheetHeight = 460.dp
-        val targetSheetOffsetY = if (showInfoDrawer) 0f else with(density) { sheetHeight.toPx() }
-        var dragSheetOffset by remember { mutableStateOf(0f) }
-        val animatedSheetOffsetY by animateFloatAsState(
-            targetValue = targetSheetOffsetY + dragSheetOffset,
-            animationSpec = spring(stiffness = Spring.StiffnessMediumLow)
-        )
-
-        Box(
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .fillMaxWidth()
-                .height(sheetHeight)
-                .offset { IntOffset(0, animatedSheetOffsetY.roundToInt()) }
-                .background(
-                    color = Color(0xEE121214), // Premium dark glass
-                    shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)
-                )
-                .border(
-                    width = 1.dp,
-                    color = Color.White.copy(alpha = 0.08f),
-                    shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)
-                )
-                .pointerInput(Unit) {
-                    detectVerticalDragGestures(
-                        onVerticalDrag = { change, dragAmount ->
-                            change.consume()
-                            // Drag downwards to dismiss details
-                            dragSheetOffset = (dragSheetOffset + dragAmount).coerceAtLeast(0f)
-                        },
-                        onDragEnd = {
-                            if (dragSheetOffset > 150f) {
-                                showInfoDrawer = false
-                            }
-                            dragSheetOffset = 0f
-                        },
-                        onDragCancel = {
-                            dragSheetOffset = 0f
-                        }
-                    )
-                }
-                .padding(horizontal = 24.dp, vertical = 8.dp)
-        ) {
-            // Drag indicator gray bar
-            Box(
-                modifier = Modifier
-                    .align(Alignment.TopCenter)
-                    .padding(top = 8.dp, bottom = 16.dp)
-                    .width(36.dp)
-                    .height(4.dp)
-                    .background(Color.White.copy(alpha = 0.3f), CircleShape)
-            )
-
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(top = 28.dp)
-                    .verticalScroll(rememberScrollState())
-            ) {
-                Text(
-                    text = "Details",
-                    style = MaterialTheme.typography.titleLarge,
-                    fontWeight = FontWeight.Bold,
-                    color = Color.White,
-                    modifier = Modifier.padding(bottom = 20.dp)
-                )
-
-                Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                    InfoRow(label = "Filename", value = activeItem.name)
-                    InfoRow(label = "Folder", value = activeItem.bucketName)
-                    InfoRow(label = "Type", value = activeItem.mimeType)
-                    InfoRow(label = "Size", value = formatSize(activeItem.size))
-                    if (activeItem.width > 0 && activeItem.height > 0) {
-                        InfoRow(label = "Resolution", value = "${activeItem.width} x ${activeItem.height}")
-                    }
-                    InfoRow(label = "Date Modified", value = formatFullDate(activeItem.dateAdded))
-                    InfoRow(label = "File Path", value = activeItem.path)
-                }
-            }
-        }
-    }
-}
-
-// Custom detail row styled minimally
-@Composable
-private fun InfoRow(label: String, value: String) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.Top
-    ) {
-        Text(
-            text = label,
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.5f),
-            modifier = Modifier.weight(1f)
-        )
-        Text(
-            text = value,
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onBackground,
-            textAlign = TextAlign.End,
-            modifier = Modifier.weight(2f)
-        )
     }
 }
 

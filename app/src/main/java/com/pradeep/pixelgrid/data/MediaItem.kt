@@ -25,3 +25,10 @@ data class MediaBucket(
     val coverUri: Uri,
     val itemCount: Int
 )
+
+data class RectBounds(
+    val left: Float,
+    val top: Float,
+    val width: Float,
+    val height: Float
+)

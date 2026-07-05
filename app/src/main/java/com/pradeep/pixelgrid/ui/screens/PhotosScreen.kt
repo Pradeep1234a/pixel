@@ -52,6 +52,9 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.LayoutCoordinates
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.BiasAlignment
@@ -67,6 +70,7 @@ import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import coil.request.videoFrameMillis
 import com.pradeep.pixelgrid.data.MediaItem
+import com.pradeep.pixelgrid.data.RectBounds
 import com.pradeep.pixelgrid.data.MediaRepository
 import com.pradeep.pixelgrid.ui.components.ShadcnBadge
 import com.pradeep.pixelgrid.ui.components.ShadcnButton
@@ -88,7 +92,7 @@ fun PhotosScreen(
     gridColumns: Int,
     layoutMode: String,
     onColumnsChange: (Int) -> Unit,
-    onMediaClick: (List<MediaItem>, Int) -> Unit,
+    onMediaClick: (List<MediaItem>, Int, RectBounds?) -> Unit,
     onRefresh: () -> Unit,
     topPadding: Dp,
     onScrollChange: (Float) -> Unit,
@@ -617,7 +621,7 @@ fun PhotosScreen(
                                                     .clip(RoundedCornerShape(12.dp))
                                                     .clickable {
                                                         if (memory.items.isNotEmpty()) {
-                                                            onMediaClick(memory.items, 0)
+                                                            onMediaClick(memory.items, 0, null)
                                                         }
                                                     }
                                             ) {
@@ -687,12 +691,12 @@ fun PhotosScreen(
                                                         if (!isSelectionMode) isSelectionMode = true
                                                         toggleSelection(item)
                                                     },
-                                                    onClick = {
-                                                        if (isSelectionMode) {
-                                                            toggleSelection(item)
-                                                        } else {
-                                                            onMediaClick(filteredMediaList, filteredMediaList.indexOf(item))
-                                                        }
+                                                    onClick = { bounds ->
+                                                         if (isSelectionMode) {
+                                                             toggleSelection(item)
+                                                         } else {
+                                                             onMediaClick(filteredMediaList, filteredMediaList.indexOf(item), bounds)
+                                                         }
                                                     },
                                                     onPreviewTrigger = { previewItem = it }
                                                 )
@@ -726,11 +730,11 @@ fun PhotosScreen(
                                                 if (!isSelectionMode) isSelectionMode = true
                                                 toggleSelection(item)
                                             },
-                                            onClick = {
+                                            onClick = { bounds ->
                                                 if (isSelectionMode) {
                                                     toggleSelection(item)
                                                 } else {
-                                                    onMediaClick(filteredMediaList, filteredMediaList.indexOf(item))
+                                                    onMediaClick(filteredMediaList, filteredMediaList.indexOf(item), bounds)
                                                 }
                                             },
                                             onPreviewTrigger = { previewItem = it }
@@ -764,11 +768,11 @@ fun PhotosScreen(
                                                 if (!isSelectionMode) isSelectionMode = true
                                                 toggleSelection(item)
                                             },
-                                            onClick = {
+                                            onClick = { bounds ->
                                                 if (isSelectionMode) {
                                                     toggleSelection(item)
                                                 } else {
-                                                    onMediaClick(filteredMediaList, filteredMediaList.indexOf(item))
+                                                    onMediaClick(filteredMediaList, filteredMediaList.indexOf(item), bounds)
                                                 }
                                             },
                                             onPreviewTrigger = { previewItem = it }
@@ -927,10 +931,11 @@ private fun BentoImageTile(
     isSelected: Boolean,
     isSelectionMode: Boolean,
     onSelectToggle: () -> Unit,
-    onClick: () -> Unit,
+    onClick: (RectBounds?) -> Unit,
     onPreviewTrigger: (MediaItem?) -> Unit
 ) {
     val coroutineScope = rememberCoroutineScope()
+    var currentLayoutCoordinates by remember { mutableStateOf<LayoutCoordinates?>(null) }
 
     // Heuristics-based focal-point cropping to prevent cutting off heads/text
     val smartAlignment = remember(item) {
@@ -949,6 +954,7 @@ private fun BentoImageTile(
 
     Box(
         modifier = modifier
+            .onGloballyPositioned { currentLayoutCoordinates = it }
             .clip(RoundedCornerShape(12.dp))
             .background(MaterialTheme.colorScheme.secondary)
             .border(
@@ -977,7 +983,15 @@ private fun BentoImageTile(
                             if (isSelectionMode) {
                                 onSelectToggle()
                             } else {
-                                onClick()
+                                val coordinates = currentLayoutCoordinates
+                                val bounds = if (coordinates != null && coordinates.isAttached) {
+                                    val pos = coordinates.positionInWindow()
+                                    val size = coordinates.size
+                                    RectBounds(pos.x, pos.y, size.width.toFloat(), size.height.toFloat())
+                                } else {
+                                    null
+                                }
+                                onClick(bounds)
                             }
                         }
                     }

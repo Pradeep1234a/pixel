@@ -50,6 +50,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.animation.core.animateDpAsState
 import com.pradeep.pixelgrid.data.MediaItem
+import com.pradeep.pixelgrid.data.RectBounds
 import com.pradeep.pixelgrid.data.MediaRepository
 import com.pradeep.pixelgrid.data.UpdateInfo
 import com.pradeep.pixelgrid.data.UpdateManager
@@ -92,6 +93,7 @@ fun MainApp(
     // Swipe pager viewer states
     var viewerMediaList by remember { mutableStateOf<List<MediaItem>>(emptyList()) }
     var viewerInitialIndex by remember { mutableStateOf(-1) }
+    var clickedBounds by remember { mutableStateOf<RectBounds?>(null) }
     var itemToDelete by remember { mutableStateOf<MediaItem?>(null) }
 
     // Update checker states
@@ -431,9 +433,10 @@ fun MainApp(
                                     gridColumns = cols
                                     prefs.edit().putInt(KEY_COLUMNS, cols).apply()
                                 },
-                                onMediaClick = { list, index ->
+                                onMediaClick = { list, index, bounds ->
                                     viewerMediaList = list
                                     viewerInitialIndex = index
+                                    clickedBounds = bounds
                                 },
                                 onRefresh = refreshMedia,
                                 topPadding = topPaddingValue,
@@ -717,6 +720,7 @@ fun MainApp(
                             mediaList = listWithFavorites,
                             initialIndex = viewerInitialIndex,
                             onBack = { viewerInitialIndex = -1 },
+                            clickedBounds = clickedBounds,
                             videoAutoplay = videoAutoplay,
                             darkTheme = darkTheme,
                             onFavoriteToggle = { clickedItem ->

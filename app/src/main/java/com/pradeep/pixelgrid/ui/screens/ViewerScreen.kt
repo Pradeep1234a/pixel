@@ -60,6 +60,9 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
 import coil.compose.AsyncImage
+import coil.request.ImageRequest
+import coil.request.videoFrameMillis
+import androidx.compose.ui.platform.LocalContext
 import com.pradeep.pixelgrid.data.MediaItem
 import com.pradeep.pixelgrid.ui.components.ShadcnCard
 import java.text.SimpleDateFormat
@@ -306,8 +309,19 @@ fun ViewerScreen(
                                     }
                                 }
                         ) {
+                            val context = LocalContext.current
+                            val imageModel = remember(item) {
+                                if (item.isVideo) {
+                                    ImageRequest.Builder(context)
+                                        .data(item.uri)
+                                        .videoFrameMillis(1000)
+                                        .build()
+                                } else {
+                                    item.uri as Any
+                                }
+                            }
                             AsyncImage(
-                                model = item.uri,
+                                model = imageModel,
                                 contentDescription = item.name,
                                 modifier = Modifier.fillMaxSize(),
                                 contentScale = ContentScale.Crop

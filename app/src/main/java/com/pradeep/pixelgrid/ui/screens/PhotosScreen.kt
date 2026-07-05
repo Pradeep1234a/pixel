@@ -533,7 +533,12 @@ fun PhotosScreen(
                         .weight(1f)
                         .padding(horizontal = 16.dp)
                         .then(pinchModifier),
-                    verticalArrangement = Arrangement.spacedBy(if (layoutMode == "compact") 4.dp else 16.dp),
+                    verticalArrangement = Arrangement.spacedBy(
+                        if (layoutMode == "compact") 4.dp
+                        else if (layoutMode == "bento" && gridColumns >= 5) 4.dp
+                        else if (layoutMode == "bento") 8.dp
+                        else 16.dp
+                    ),
                     contentPadding = PaddingValues(top = topPadding, bottom = 80.dp)
                 ) {
                     // --- CAROUSELS HEADER SECTION ---
@@ -638,6 +643,7 @@ fun PhotosScreen(
                         bentoRows.forEach { (dateHeader, rows) ->
                             stickyHeader { DateHeader(dateHeader) }
                             items(rows) { spec ->
+                                val bentoSpacing = if (gridColumns >= 5) 4.dp else 8.dp
                                 when (spec) {
                                     is BentoRowSpec.Panoramic -> {
                                         BentoImageTile(
@@ -662,7 +668,7 @@ fun PhotosScreen(
                                     is BentoRowSpec.SmallRow -> {
                                         Row(
                                             modifier = Modifier.fillMaxWidth(),
-                                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                            horizontalArrangement = Arrangement.spacedBy(bentoSpacing)
                                         ) {
                                             spec.items.forEach { item ->
                                                 BentoImageTile(
@@ -695,7 +701,7 @@ fun PhotosScreen(
                                     is BentoRowSpec.LargeLeft -> {
                                         Row(
                                             modifier = Modifier.fillMaxWidth(),
-                                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                            horizontalArrangement = Arrangement.spacedBy(bentoSpacing)
                                         ) {
                                             BentoImageTile(
                                                 item = spec.large,
@@ -718,7 +724,7 @@ fun PhotosScreen(
                                             spec.rightColumns.forEach { pair ->
                                                 Column(
                                                     modifier = Modifier.weight(1f),
-                                                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                                                    verticalArrangement = Arrangement.spacedBy(bentoSpacing)
                                                 ) {
                                                     BentoImageTile(
                                                         item = pair.first,
@@ -763,12 +769,12 @@ fun PhotosScreen(
                                     is BentoRowSpec.LargeRight -> {
                                         Row(
                                             modifier = Modifier.fillMaxWidth(),
-                                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                            horizontalArrangement = Arrangement.spacedBy(bentoSpacing)
                                         ) {
                                             spec.leftColumns.forEach { pair ->
                                                 Column(
                                                     modifier = Modifier.weight(1f),
-                                                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                                                    verticalArrangement = Arrangement.spacedBy(bentoSpacing)
                                                 ) {
                                                     BentoImageTile(
                                                         item = pair.first,

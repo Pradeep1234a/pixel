@@ -606,88 +606,90 @@ fun MainApp(
 
                                             if (currentTab == 0) {
                                                 var showOverflowMenu by remember { mutableStateOf(false) }
-                                                IconButton(onClick = { showOverflowMenu = true }) {
-                                                    Icon(
-                                                        imageVector = Icons.Default.MoreVert,
-                                                        contentDescription = "More actions",
-                                                        tint = MaterialTheme.colorScheme.onBackground
-                                                    )
-                                                }
-                                                DropdownMenu(
-                                                    expanded = showOverflowMenu,
-                                                    onDismissRequest = { showOverflowMenu = false }
-                                                ) {
-                                                    DropdownMenuItem(
-                                                        text = { Text("Refresh Library") },
-                                                        onClick = {
-                                                            showOverflowMenu = false
-                                                            refreshMedia()
-                                                        }
-                                                    )
-                                                    DropdownMenuItem(
-                                                        text = { Text("Layout: Adaptive Bento") },
-                                                        onClick = {
-                                                            showOverflowMenu = false
-                                                            layoutMode = "bento"
-                                                            prefs.edit().putString("layout_mode", "bento").apply()
-                                                        }
-                                                    )
-                                                    DropdownMenuItem(
-                                                        text = { Text("Layout: Masonry Staggered") },
-                                                        onClick = {
-                                                            showOverflowMenu = false
-                                                            layoutMode = "masonry"
-                                                            prefs.edit().putString("layout_mode", "masonry").apply()
-                                                        }
-                                                    )
-                                                    DropdownMenuItem(
-                                                        text = { Text("Layout: Justified Gallery") },
-                                                        onClick = {
-                                                            showOverflowMenu = false
-                                                            layoutMode = "justified"
-                                                            prefs.edit().putString("layout_mode", "justified").apply()
-                                                        }
-                                                    )
-                                                    DropdownMenuItem(
-                                                        text = { Text("Layout: Uniform Square") },
-                                                        onClick = {
-                                                            showOverflowMenu = false
-                                                            layoutMode = "square"
-                                                            prefs.edit().putString("layout_mode", "square").apply()
-                                                        }
-                                                    )
-                                                    DropdownMenuItem(
-                                                        text = { Text("Layout: Compact Timeline") },
-                                                        onClick = {
-                                                            showOverflowMenu = false
-                                                            layoutMode = "compact"
-                                                            prefs.edit().putString("layout_mode", "compact").apply()
-                                                        }
-                                                    )
-                                                    DropdownMenuItem(
-                                                        text = { Text("Select Multiple") },
-                                                        onClick = {
-                                                            showOverflowMenu = false
-                                                            isSelectionActive = true
-                                                        }
-                                                    )
-                                                    DropdownMenuItem(
-                                                        text = { Text("Slideshow") },
-                                                        onClick = {
-                                                            showOverflowMenu = false
-                                                            if (mediaList.isNotEmpty()) {
-                                                                viewerMediaList = mediaList
-                                                                viewerInitialIndex = 0
+                                                Box {
+                                                    IconButton(onClick = { showOverflowMenu = true }) {
+                                                        Icon(
+                                                            imageVector = Icons.Default.MoreVert,
+                                                            contentDescription = "More actions",
+                                                            tint = MaterialTheme.colorScheme.onBackground
+                                                        )
+                                                    }
+                                                    DropdownMenu(
+                                                        expanded = showOverflowMenu,
+                                                        onDismissRequest = { showOverflowMenu = false }
+                                                    ) {
+                                                        DropdownMenuItem(
+                                                            text = { Text("Refresh Library") },
+                                                            onClick = {
+                                                                showOverflowMenu = false
+                                                                refreshMedia()
                                                             }
-                                                        }
-                                                    )
-                                                    DropdownMenuItem(
-                                                        text = { Text("Storage Information") },
-                                                        onClick = {
-                                                            showOverflowMenu = false
-                                                            currentTab = 3
-                                                        }
-                                                    )
+                                                        )
+                                                        DropdownMenuItem(
+                                                            text = { Text("Layout: Adaptive Bento") },
+                                                            onClick = {
+                                                                showOverflowMenu = false
+                                                                layoutMode = "bento"
+                                                                prefs.edit().putString("layout_mode", "bento").apply()
+                                                            }
+                                                        )
+                                                        DropdownMenuItem(
+                                                            text = { Text("Layout: Masonry Staggered") },
+                                                            onClick = {
+                                                                showOverflowMenu = false
+                                                                layoutMode = "masonry"
+                                                                prefs.edit().putString("layout_mode", "masonry").apply()
+                                                            }
+                                                        )
+                                                        DropdownMenuItem(
+                                                            text = { Text("Layout: Justified Gallery") },
+                                                            onClick = {
+                                                                showOverflowMenu = false
+                                                                layoutMode = "justified"
+                                                                prefs.edit().putString("layout_mode", "justified").apply()
+                                                            }
+                                                        )
+                                                        DropdownMenuItem(
+                                                            text = { Text("Layout: Uniform Square") },
+                                                            onClick = {
+                                                                showOverflowMenu = false
+                                                                layoutMode = "square"
+                                                                prefs.edit().putString("layout_mode", "square").apply()
+                                                            }
+                                                        )
+                                                        DropdownMenuItem(
+                                                            text = { Text("Layout: Compact Timeline") },
+                                                            onClick = {
+                                                                showOverflowMenu = false
+                                                                layoutMode = "compact"
+                                                                prefs.edit().putString("layout_mode", "compact").apply()
+                                                            }
+                                                        )
+                                                        DropdownMenuItem(
+                                                            text = { Text("Select Multiple") },
+                                                            onClick = {
+                                                                showOverflowMenu = false
+                                                                isSelectionActive = true
+                                                            }
+                                                        )
+                                                        DropdownMenuItem(
+                                                            text = { Text("Slideshow") },
+                                                            onClick = {
+                                                                showOverflowMenu = false
+                                                                if (mediaList.isNotEmpty()) {
+                                                                    viewerMediaList = mediaList
+                                                                    viewerInitialIndex = 0
+                                                                }
+                                                            }
+                                                        )
+                                                        DropdownMenuItem(
+                                                            text = { Text("Storage Information") },
+                                                            onClick = {
+                                                                showOverflowMenu = false
+                                                                currentTab = 3
+                                                            }
+                                                        )
+                                                    }
                                                 }
                                             }
 

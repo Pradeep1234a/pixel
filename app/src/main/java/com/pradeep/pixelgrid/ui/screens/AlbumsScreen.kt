@@ -25,6 +25,9 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
+import coil.request.ImageRequest
+import coil.request.videoFrameMillis
+import androidx.compose.ui.platform.LocalContext
 import com.pradeep.pixelgrid.data.MediaBucket
 import com.pradeep.pixelgrid.data.MediaItem
 import com.pradeep.pixelgrid.ui.components.ShadcnCard
@@ -174,8 +177,19 @@ fun AlbumsScreen(
                                 .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(8.dp))
                                 .clickable { onMediaClick(albumMedia, albumMedia.indexOf(item)) }
                         ) {
+                            val context = LocalContext.current
+                            val imageModel = remember(item) {
+                                if (item.isVideo) {
+                                    ImageRequest.Builder(context)
+                                        .data(item.uri)
+                                        .videoFrameMillis(1000)
+                                        .build()
+                                } else {
+                                    item.uri as Any
+                                }
+                            }
                             AsyncImage(
-                                model = item.uri,
+                                model = imageModel,
                                 contentDescription = item.name,
                                 modifier = Modifier.fillMaxSize(),
                                 contentScale = ContentScale.Crop
@@ -229,8 +243,15 @@ private fun AlbumCard(
                     .clip(RoundedCornerShape(6.dp))
                     .background(MaterialTheme.colorScheme.secondary)
             ) {
+                val context = LocalContext.current
+                val coverModel = remember(bucket.coverUri) {
+                    ImageRequest.Builder(context)
+                        .data(bucket.coverUri)
+                        .videoFrameMillis(1000)
+                        .build()
+                }
                 AsyncImage(
-                    model = bucket.coverUri,
+                    model = coverModel,
                     contentDescription = bucket.name,
                     modifier = Modifier.fillMaxSize(),
                     contentScale = ContentScale.Crop

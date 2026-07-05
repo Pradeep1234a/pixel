@@ -39,6 +39,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.BiasAlignment
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -73,6 +75,7 @@ sealed class BentoRowSpec {
 fun PhotosScreen(
     mediaList: List<MediaItem>,
     gridColumns: Int,
+    layoutMode: String,
     onColumnsChange: (Int) -> Unit,
     onMediaClick: (List<MediaItem>, Int) -> Unit,
     onRefresh: () -> Unit,
@@ -192,9 +195,37 @@ fun PhotosScreen(
     }
 
     // Precompute dynamic asymmetrical packed Bento rows per date group
-    val groupedMediaRows = remember(groupedMedia, gridColumns) {
+    val bentoRows = remember(groupedMedia, gridColumns) {
         groupedMedia.mapValues { (_, items) ->
             packItemsIntoBentoRows(items, gridColumns)
+        }
+    }
+
+    // Precompute Staggered Masonry rows
+    val masonryRows = remember(groupedMedia, gridColumns) {
+        groupedMedia.mapValues { (_, items) ->
+            items.chunked(gridColumns)
+        }
+    }
+
+    // Precompute Justified Gallery rows
+    val justifiedRows = remember(groupedMedia) {
+        groupedMedia.mapValues { (_, items) ->
+            packJustifiedRows(items)
+        }
+    }
+
+    // Precompute Uniform Square rows
+    val squareRows = remember(groupedMedia, gridColumns) {
+        groupedMedia.mapValues { (_, items) ->
+            items.chunked(gridColumns)
+        }
+    }
+
+    // Precompute Compact Timeline rows
+    val compactRows = remember(groupedMedia) {
+        groupedMedia.mapValues { (_, items) ->
+            items.chunked(5)
         }
     }
 
@@ -236,19 +267,22 @@ fun PhotosScreen(
 
     // Pinch-to-Zoom grid column gesture tracker
     var zoomAccumulator by remember { mutableStateOf(1f) }
-    val pinchModifier = Modifier.pointerInput(gridColumns) {
+    val pinchModifier = Modifier.pointerInput(gridColumns, layoutMode) {
         detectTransformGestures { _, _, zoom, _ ->
-            zoomAccumulator *= zoom
-            if (zoomAccumulator > 1.35f) {
-                if (gridColumns > 1) {
-                    onColumnsChange(gridColumns - 1)
+            // Pinch gesture is disabled in Justified and Compact layouts to maintain visual focus
+            if (layoutMode != "justified" && layoutMode != "compact") {
+                zoomAccumulator *= zoom
+                if (zoomAccumulator > 1.35f) {
+                    if (gridColumns > 1) {
+                        onColumnsChange(gridColumns - 1)
+                    }
+                    zoomAccumulator = 1f
+                } else if (zoomAccumulator < 0.65f) {
+                    if (gridColumns < 6) {
+                        onColumnsChange(gridColumns + 1)
+                    }
+                    zoomAccumulator = 1f
                 }
-                zoomAccumulator = 1f
-            } else if (zoomAccumulator < 0.65f) {
-                if (gridColumns < 6) {
-                    onColumnsChange(gridColumns + 1)
-                }
-                zoomAccumulator = 1f
             }
         }
     }
@@ -339,7 +373,7 @@ fun PhotosScreen(
                         .weight(1f)
                         .padding(horizontal = 16.dp)
                         .then(pinchModifier),
-                    verticalArrangement = Arrangement.spacedBy(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(if (layoutMode == "compact") 4.dp else 16.dp),
                     contentPadding = PaddingValues(top = topPadding, bottom = 80.dp)
                 ) {
                     // --- CAROUSELS HEADER SECTION ---
@@ -446,321 +480,471 @@ fun PhotosScreen(
                         }
                     }
 
-                    // --- BENTO GRID SECTIONS ---
-                    groupedMediaRows.forEach { (dateHeader, rows) ->
-                        stickyHeader {
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .background(MaterialTheme.colorScheme.background)
-                                    .padding(vertical = 8.dp)
-                            ) {
-                                Text(
-                                    text = dateHeader,
-                                    style = MaterialTheme.typography.titleMedium,
-                                    fontWeight = FontWeight.Bold,
-                                    color = MaterialTheme.colorScheme.onBackground
-                                )
+                    // --- PHOTOS SECTION & GRID RENDERING ---
+                    if (layoutMode == "bento") {
+                        bentoRows.forEach { (dateHeader, rows) ->
+                            stickyHeader { DateHeader(dateHeader) }
+                            items(rows) { spec ->
+                                when (spec) {
+                                    is BentoRowSpec.Panoramic -> {
+                                        BentoImageTile(
+                                            item = spec.item,
+                                            modifier = Modifier.fillMaxWidth().aspectRatio(2.2f),
+                                            isSelected = selectedItems.any { it.id == spec.item.id },
+                                            isSelectionMode = isSelectionMode,
+                                            onSelectToggle = {
+                                                if (!isSelectionMode) isSelectionMode = true
+                                                toggleSelection(spec.item)
+                                            },
+                                            onClick = {
+                                                if (isSelectionMode) {
+                                                    toggleSelection(spec.item)
+                                                } else {
+                                                    onMediaClick(filteredMediaList, filteredMediaList.indexOf(spec.item))
+                                                }
+                                            },
+                                            onPreviewTrigger = { previewItem = it }
+                                        )
+                                    }
+                                    is BentoRowSpec.OneSmall -> {
+                                        Row(modifier = Modifier.fillMaxWidth()) {
+                                            BentoImageTile(
+                                                item = spec.item1,
+                                                modifier = Modifier.weight(1f).aspectRatio(1f),
+                                                isSelected = selectedItems.any { it.id == spec.item1.id },
+                                                isSelectionMode = isSelectionMode,
+                                                onSelectToggle = {
+                                                    if (!isSelectionMode) isSelectionMode = true
+                                                    toggleSelection(spec.item1)
+                                                },
+                                                onClick = {
+                                                    if (isSelectionMode) {
+                                                        toggleSelection(spec.item1)
+                                                    } else {
+                                                        onMediaClick(filteredMediaList, filteredMediaList.indexOf(spec.item1))
+                                                    }
+                                                },
+                                                onPreviewTrigger = { previewItem = it }
+                                            )
+                                            if (gridColumns >= 2) {
+                                                val spaceWeight = gridColumns - 1
+                                                Spacer(modifier = Modifier.weight(spaceWeight.toFloat()))
+                                            }
+                                        }
+                                    }
+                                    is BentoRowSpec.TwoSmall -> {
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                        ) {
+                                            BentoImageTile(
+                                                item = spec.item1,
+                                                modifier = Modifier.weight(1f).aspectRatio(1f),
+                                                isSelected = selectedItems.any { it.id == spec.item1.id },
+                                                isSelectionMode = isSelectionMode,
+                                                onSelectToggle = {
+                                                    if (!isSelectionMode) isSelectionMode = true
+                                                    toggleSelection(spec.item1)
+                                                },
+                                                onClick = {
+                                                    if (isSelectionMode) {
+                                                        toggleSelection(spec.item1)
+                                                    } else {
+                                                        onMediaClick(filteredMediaList, filteredMediaList.indexOf(spec.item1))
+                                                    }
+                                                },
+                                                onPreviewTrigger = { previewItem = it }
+                                            )
+                                            BentoImageTile(
+                                                item = spec.item2,
+                                                modifier = Modifier.weight(1f).aspectRatio(1f),
+                                                isSelected = selectedItems.any { it.id == spec.item2.id },
+                                                isSelectionMode = isSelectionMode,
+                                                onSelectToggle = {
+                                                    if (!isSelectionMode) isSelectionMode = true
+                                                    toggleSelection(spec.item2)
+                                                },
+                                                onClick = {
+                                                    if (isSelectionMode) {
+                                                        toggleSelection(spec.item2)
+                                                    } else {
+                                                        onMediaClick(filteredMediaList, filteredMediaList.indexOf(spec.item2))
+                                                    }
+                                                },
+                                                onPreviewTrigger = { previewItem = it }
+                                            )
+                                            if (gridColumns >= 3) {
+                                                val spaceWeight = gridColumns - 2
+                                                Spacer(modifier = Modifier.weight(spaceWeight.toFloat()))
+                                            }
+                                        }
+                                    }
+                                    is BentoRowSpec.ThreeSmall -> {
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                        ) {
+                                            BentoImageTile(
+                                                item = spec.item1,
+                                                modifier = Modifier.weight(1f).aspectRatio(1f),
+                                                isSelected = selectedItems.any { it.id == spec.item1.id },
+                                                isSelectionMode = isSelectionMode,
+                                                onSelectToggle = {
+                                                    if (!isSelectionMode) isSelectionMode = true
+                                                    toggleSelection(spec.item1)
+                                                },
+                                                onClick = {
+                                                    if (isSelectionMode) {
+                                                        toggleSelection(spec.item1)
+                                                    } else {
+                                                        onMediaClick(filteredMediaList, filteredMediaList.indexOf(spec.item1))
+                                                    }
+                                                },
+                                                onPreviewTrigger = { previewItem = it }
+                                            )
+                                            BentoImageTile(
+                                                item = spec.item2,
+                                                modifier = Modifier.weight(1f).aspectRatio(1f),
+                                                isSelected = selectedItems.any { it.id == spec.item2.id },
+                                                isSelectionMode = isSelectionMode,
+                                                onSelectToggle = {
+                                                    if (!isSelectionMode) isSelectionMode = true
+                                                    toggleSelection(spec.item2)
+                                                },
+                                                onClick = {
+                                                    if (isSelectionMode) {
+                                                        toggleSelection(spec.item2)
+                                                    } else {
+                                                        onMediaClick(filteredMediaList, filteredMediaList.indexOf(spec.item2))
+                                                    }
+                                                },
+                                                onPreviewTrigger = { previewItem = it }
+                                            )
+                                            BentoImageTile(
+                                                item = spec.item3,
+                                                modifier = Modifier.weight(1f).aspectRatio(1f),
+                                                isSelected = selectedItems.any { it.id == spec.item3.id },
+                                                isSelectionMode = isSelectionMode,
+                                                onSelectToggle = {
+                                                    if (!isSelectionMode) isSelectionMode = true
+                                                    toggleSelection(spec.item3)
+                                                },
+                                                onClick = {
+                                                    if (isSelectionMode) {
+                                                        toggleSelection(spec.item3)
+                                                    } else {
+                                                        onMediaClick(filteredMediaList, filteredMediaList.indexOf(spec.item3))
+                                                    }
+                                                },
+                                                onPreviewTrigger = { previewItem = it }
+                                            )
+                                            if (gridColumns >= 4) {
+                                                val spaceWeight = gridColumns - 3
+                                                Spacer(modifier = Modifier.weight(spaceWeight.toFloat()))
+                                            }
+                                        }
+                                    }
+                                    is BentoRowSpec.LargeLeft -> {
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                        ) {
+                                            BentoImageTile(
+                                                item = spec.large,
+                                                modifier = Modifier.weight(2f).aspectRatio(0.96f),
+                                                isSelected = selectedItems.any { it.id == spec.large.id },
+                                                isSelectionMode = isSelectionMode,
+                                                onSelectToggle = {
+                                                    if (!isSelectionMode) isSelectionMode = true
+                                                    toggleSelection(spec.large)
+                                                },
+                                                onClick = {
+                                                    if (isSelectionMode) {
+                                                        toggleSelection(spec.large)
+                                                    } else {
+                                                        onMediaClick(filteredMediaList, filteredMediaList.indexOf(spec.large))
+                                                    }
+                                                },
+                                                onPreviewTrigger = { previewItem = it }
+                                            )
+                                            Column(
+                                                modifier = Modifier.weight(1f),
+                                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                                            ) {
+                                                BentoImageTile(
+                                                    item = spec.topSmall,
+                                                    modifier = Modifier.fillMaxWidth().aspectRatio(1f),
+                                                    isSelected = selectedItems.any { it.id == spec.topSmall.id },
+                                                    isSelectionMode = isSelectionMode,
+                                                    onSelectToggle = {
+                                                        if (!isSelectionMode) isSelectionMode = true
+                                                        toggleSelection(spec.topSmall)
+                                                    },
+                                                    onClick = {
+                                                        if (isSelectionMode) {
+                                                            toggleSelection(spec.topSmall)
+                                                        } else {
+                                                            onMediaClick(filteredMediaList, filteredMediaList.indexOf(spec.topSmall))
+                                                        }
+                                                    },
+                                                    onPreviewTrigger = { previewItem = it }
+                                                )
+                                                BentoImageTile(
+                                                    item = spec.bottomSmall,
+                                                    modifier = Modifier.fillMaxWidth().aspectRatio(1f),
+                                                    isSelected = selectedItems.any { it.id == spec.bottomSmall.id },
+                                                    isSelectionMode = isSelectionMode,
+                                                    onSelectToggle = {
+                                                        if (!isSelectionMode) isSelectionMode = true
+                                                        toggleSelection(spec.bottomSmall)
+                                                    },
+                                                    onClick = {
+                                                        if (isSelectionMode) {
+                                                            toggleSelection(spec.bottomSmall)
+                                                        } else {
+                                                            onMediaClick(filteredMediaList, filteredMediaList.indexOf(spec.bottomSmall))
+                                                        }
+                                                    },
+                                                    onPreviewTrigger = { previewItem = it }
+                                                )
+                                            }
+                                            if (gridColumns >= 4) {
+                                                val spaceWeight = gridColumns - 3
+                                                Spacer(modifier = Modifier.weight(spaceWeight.toFloat()))
+                                            }
+                                        }
+                                    }
+                                    is BentoRowSpec.LargeRight -> {
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                        ) {
+                                            Column(
+                                                modifier = Modifier.weight(1f),
+                                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                                            ) {
+                                                BentoImageTile(
+                                                    item = spec.topSmall,
+                                                    modifier = Modifier.fillMaxWidth().aspectRatio(1f),
+                                                    isSelected = selectedItems.any { it.id == spec.topSmall.id },
+                                                    isSelectionMode = isSelectionMode,
+                                                    onSelectToggle = {
+                                                        if (!isSelectionMode) isSelectionMode = true
+                                                        toggleSelection(spec.topSmall)
+                                                    },
+                                                    onClick = {
+                                                        if (isSelectionMode) {
+                                                            toggleSelection(spec.topSmall)
+                                                        } else {
+                                                            onMediaClick(filteredMediaList, filteredMediaList.indexOf(spec.topSmall))
+                                                        }
+                                                    },
+                                                    onPreviewTrigger = { previewItem = it }
+                                                )
+                                                BentoImageTile(
+                                                    item = spec.bottomSmall,
+                                                    modifier = Modifier.fillMaxWidth().aspectRatio(1f),
+                                                    isSelected = selectedItems.any { it.id == spec.bottomSmall.id },
+                                                    isSelectionMode = isSelectionMode,
+                                                    onSelectToggle = {
+                                                        if (!isSelectionMode) isSelectionMode = true
+                                                        toggleSelection(spec.bottomSmall)
+                                                    },
+                                                    onClick = {
+                                                        if (isSelectionMode) {
+                                                            toggleSelection(spec.bottomSmall)
+                                                        } else {
+                                                            onMediaClick(filteredMediaList, filteredMediaList.indexOf(spec.bottomSmall))
+                                                        }
+                                                    },
+                                                    onPreviewTrigger = { previewItem = it }
+                                                )
+                                            }
+                                            BentoImageTile(
+                                                item = spec.large,
+                                                modifier = Modifier.weight(2f).aspectRatio(0.96f),
+                                                isSelected = selectedItems.any { it.id == spec.large.id },
+                                                isSelectionMode = isSelectionMode,
+                                                onSelectToggle = {
+                                                    if (!isSelectionMode) isSelectionMode = true
+                                                    toggleSelection(spec.large)
+                                                },
+                                                onClick = {
+                                                    if (isSelectionMode) {
+                                                        toggleSelection(spec.large)
+                                                    } else {
+                                                        onMediaClick(filteredMediaList, filteredMediaList.indexOf(spec.large))
+                                                    }
+                                                },
+                                                onPreviewTrigger = { previewItem = it }
+                                            )
+                                            if (gridColumns >= 4) {
+                                                val spaceWeight = gridColumns - 3
+                                                Spacer(modifier = Modifier.weight(spaceWeight.toFloat()))
+                                            }
+                                        }
+                                    }
+                                }
                             }
                         }
-
-                        items(rows) { spec ->
-                            when (spec) {
-                                is BentoRowSpec.Panoramic -> {
-                                    BentoImageTile(
-                                        item = spec.item,
-                                        modifier = Modifier.fillMaxWidth().aspectRatio(2.2f),
-                                        isSelected = selectedItems.any { it.id == spec.item.id },
-                                        isSelectionMode = isSelectionMode,
-                                        onSelectToggle = {
-                                            if (!isSelectionMode) isSelectionMode = true
-                                            toggleSelection(spec.item)
-                                        },
-                                        onClick = {
-                                            if (isSelectionMode) {
-                                                toggleSelection(spec.item)
-                                            } else {
-                                                onMediaClick(filteredMediaList, filteredMediaList.indexOf(spec.item))
-                                            }
-                                        },
-                                        onPreviewTrigger = { previewItem = it }
-                                    )
-                                }
-                                is BentoRowSpec.OneSmall -> {
-                                    Row(modifier = Modifier.fillMaxWidth()) {
+                    }
+                    else if (layoutMode == "masonry") {
+                        masonryRows.forEach { (dateHeader, rows) ->
+                            stickyHeader { DateHeader(dateHeader) }
+                            items(rows) { rowItems ->
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    rowItems.forEachIndexed { index, item ->
+                                        val ratio = when {
+                                            gridColumns >= 3 && index % 3 == 0 -> 0.75f
+                                            gridColumns >= 3 && index % 3 == 1 -> 1.33f
+                                            else -> 1f
+                                        }
                                         BentoImageTile(
-                                            item = spec.item1,
-                                            modifier = Modifier.weight(1f).aspectRatio(1f),
-                                            isSelected = selectedItems.any { it.id == spec.item1.id },
+                                            item = item,
+                                            modifier = Modifier.weight(1f).aspectRatio(ratio),
+                                            isSelected = selectedItems.any { it.id == item.id },
                                             isSelectionMode = isSelectionMode,
                                             onSelectToggle = {
                                                 if (!isSelectionMode) isSelectionMode = true
-                                                toggleSelection(spec.item1)
+                                                toggleSelection(item)
                                             },
                                             onClick = {
                                                 if (isSelectionMode) {
-                                                    toggleSelection(spec.item1)
+                                                    toggleSelection(item)
                                                 } else {
-                                                    onMediaClick(filteredMediaList, filteredMediaList.indexOf(spec.item1))
+                                                    onMediaClick(filteredMediaList, filteredMediaList.indexOf(item))
                                                 }
                                             },
                                             onPreviewTrigger = { previewItem = it }
                                         )
-                                        if (gridColumns >= 2) {
-                                            val spaceWeight = gridColumns - 1
-                                            Spacer(modifier = Modifier.weight(spaceWeight.toFloat()))
+                                    }
+                                    val emptySlots = gridColumns - rowItems.size
+                                    if (emptySlots > 0) {
+                                        repeat(emptySlots) {
+                                            Spacer(modifier = Modifier.weight(1f))
                                         }
                                     }
                                 }
-                                is BentoRowSpec.TwoSmall -> {
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                    ) {
+                            }
+                        }
+                    }
+                    else if (layoutMode == "justified") {
+                        justifiedRows.forEach { (dateHeader, rows) ->
+                            stickyHeader { DateHeader(dateHeader) }
+                            items(rows) { rowItems ->
+                                val spacing = 8.dp
+                                val screenWidth = LocalConfiguration.current.screenWidthDp.dp
+                                
+                                val ratios = rowItems.map { item ->
+                                    val r = if (item.width > 0 && item.height > 0) item.width.toFloat() / item.height.toFloat() else 1f
+                                    r.coerceIn(0.6f, 2.2f)
+                                }
+                                val ratioSum = ratios.sum()
+                                val m = rowItems.size
+                                val rowHeight = (screenWidth - (spacing * (m - 1))) / ratioSum
+                                
+                                Row(
+                                    modifier = Modifier.fillMaxWidth().height(rowHeight),
+                                    horizontalArrangement = Arrangement.spacedBy(spacing)
+                                ) {
+                                    rowItems.forEachIndexed { index, item ->
+                                        val weight = ratios[index]
                                         BentoImageTile(
-                                            item = spec.item1,
-                                            modifier = Modifier.weight(1f).aspectRatio(1f),
-                                            isSelected = selectedItems.any { it.id == spec.item1.id },
+                                            item = item,
+                                            modifier = Modifier.weight(weight).fillMaxHeight(),
+                                            isSelected = selectedItems.any { it.id == item.id },
                                             isSelectionMode = isSelectionMode,
                                             onSelectToggle = {
                                                 if (!isSelectionMode) isSelectionMode = true
-                                                toggleSelection(spec.item1)
+                                                toggleSelection(item)
                                             },
                                             onClick = {
                                                 if (isSelectionMode) {
-                                                    toggleSelection(spec.item1)
+                                                    toggleSelection(item)
                                                 } else {
-                                                    onMediaClick(filteredMediaList, filteredMediaList.indexOf(spec.item1))
+                                                    onMediaClick(filteredMediaList, filteredMediaList.indexOf(item))
                                                 }
                                             },
                                             onPreviewTrigger = { previewItem = it }
                                         )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    else if (layoutMode == "square") {
+                        squareRows.forEach { (dateHeader, rows) ->
+                            stickyHeader { DateHeader(dateHeader) }
+                            items(rows) { rowItems ->
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    rowItems.forEach { item ->
                                         BentoImageTile(
-                                            item = spec.item2,
+                                            item = item,
                                             modifier = Modifier.weight(1f).aspectRatio(1f),
-                                            isSelected = selectedItems.any { it.id == spec.item2.id },
+                                            isSelected = selectedItems.any { it.id == item.id },
                                             isSelectionMode = isSelectionMode,
                                             onSelectToggle = {
                                                 if (!isSelectionMode) isSelectionMode = true
-                                                toggleSelection(spec.item2)
+                                                toggleSelection(item)
                                             },
                                             onClick = {
                                                 if (isSelectionMode) {
-                                                    toggleSelection(spec.item2)
+                                                    toggleSelection(item)
                                                 } else {
-                                                    onMediaClick(filteredMediaList, filteredMediaList.indexOf(spec.item2))
+                                                    onMediaClick(filteredMediaList, filteredMediaList.indexOf(item))
                                                 }
                                             },
                                             onPreviewTrigger = { previewItem = it }
                                         )
-                                        if (gridColumns >= 3) {
-                                            val spaceWeight = gridColumns - 2
-                                            Spacer(modifier = Modifier.weight(spaceWeight.toFloat()))
+                                    }
+                                    val emptySlots = gridColumns - rowItems.size
+                                    if (emptySlots > 0) {
+                                        repeat(emptySlots) {
+                                            Spacer(modifier = Modifier.weight(1f))
                                         }
                                     }
                                 }
-                                is BentoRowSpec.ThreeSmall -> {
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                    ) {
+                            }
+                        }
+                    }
+                    else if (layoutMode == "compact") {
+                        compactRows.forEach { (dateHeader, rows) ->
+                            stickyHeader { DateHeader(dateHeader) }
+                            items(rows) { rowItems ->
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                ) {
+                                    rowItems.forEach { item ->
                                         BentoImageTile(
-                                            item = spec.item1,
+                                            item = item,
                                             modifier = Modifier.weight(1f).aspectRatio(1f),
-                                            isSelected = selectedItems.any { it.id == spec.item1.id },
+                                            isSelected = selectedItems.any { it.id == item.id },
                                             isSelectionMode = isSelectionMode,
                                             onSelectToggle = {
                                                 if (!isSelectionMode) isSelectionMode = true
-                                                toggleSelection(spec.item1)
+                                                toggleSelection(item)
                                             },
                                             onClick = {
                                                 if (isSelectionMode) {
-                                                    toggleSelection(spec.item1)
+                                                    toggleSelection(item)
                                                 } else {
-                                                    onMediaClick(filteredMediaList, filteredMediaList.indexOf(spec.item1))
+                                                    onMediaClick(filteredMediaList, filteredMediaList.indexOf(item))
                                                 }
                                             },
                                             onPreviewTrigger = { previewItem = it }
                                         )
-                                        BentoImageTile(
-                                            item = spec.item2,
-                                            modifier = Modifier.weight(1f).aspectRatio(1f),
-                                            isSelected = selectedItems.any { it.id == spec.item2.id },
-                                            isSelectionMode = isSelectionMode,
-                                            onSelectToggle = {
-                                                if (!isSelectionMode) isSelectionMode = true
-                                                toggleSelection(spec.item2)
-                                            },
-                                            onClick = {
-                                                if (isSelectionMode) {
-                                                    toggleSelection(spec.item2)
-                                                } else {
-                                                    onMediaClick(filteredMediaList, filteredMediaList.indexOf(spec.item2))
-                                                }
-                                            },
-                                            onPreviewTrigger = { previewItem = it }
-                                        )
-                                        BentoImageTile(
-                                            item = spec.item3,
-                                            modifier = Modifier.weight(1f).aspectRatio(1f),
-                                            isSelected = selectedItems.any { it.id == spec.item3.id },
-                                            isSelectionMode = isSelectionMode,
-                                            onSelectToggle = {
-                                                if (!isSelectionMode) isSelectionMode = true
-                                                toggleSelection(spec.item3)
-                                            },
-                                            onClick = {
-                                                if (isSelectionMode) {
-                                                    toggleSelection(spec.item3)
-                                                } else {
-                                                    onMediaClick(filteredMediaList, filteredMediaList.indexOf(spec.item3))
-                                                }
-                                            },
-                                            onPreviewTrigger = { previewItem = it }
-                                        )
-                                        if (gridColumns >= 4) {
-                                            val spaceWeight = gridColumns - 3
-                                            Spacer(modifier = Modifier.weight(spaceWeight.toFloat()))
-                                        }
                                     }
-                                }
-                                is BentoRowSpec.LargeLeft -> {
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                    ) {
-                                        BentoImageTile(
-                                            item = spec.large,
-                                            modifier = Modifier.weight(2f).aspectRatio(0.96f),
-                                            isSelected = selectedItems.any { it.id == spec.large.id },
-                                            isSelectionMode = isSelectionMode,
-                                            onSelectToggle = {
-                                                if (!isSelectionMode) isSelectionMode = true
-                                                toggleSelection(spec.large)
-                                            },
-                                            onClick = {
-                                                if (isSelectionMode) {
-                                                    toggleSelection(spec.large)
-                                                } else {
-                                                    onMediaClick(filteredMediaList, filteredMediaList.indexOf(spec.large))
-                                                }
-                                            },
-                                            onPreviewTrigger = { previewItem = it }
-                                        )
-                                        Column(
-                                            modifier = Modifier.weight(1f),
-                                            verticalArrangement = Arrangement.spacedBy(8.dp)
-                                        ) {
-                                            BentoImageTile(
-                                                item = spec.topSmall,
-                                                modifier = Modifier.fillMaxWidth().aspectRatio(1f),
-                                                isSelected = selectedItems.any { it.id == spec.topSmall.id },
-                                                isSelectionMode = isSelectionMode,
-                                                onSelectToggle = {
-                                                    if (!isSelectionMode) isSelectionMode = true
-                                                    toggleSelection(spec.topSmall)
-                                                },
-                                                onClick = {
-                                                    if (isSelectionMode) {
-                                                        toggleSelection(spec.topSmall)
-                                                    } else {
-                                                        onMediaClick(filteredMediaList, filteredMediaList.indexOf(spec.topSmall))
-                                                    }
-                                                },
-                                                onPreviewTrigger = { previewItem = it }
-                                            )
-                                            BentoImageTile(
-                                                item = spec.bottomSmall,
-                                                modifier = Modifier.fillMaxWidth().aspectRatio(1f),
-                                                isSelected = selectedItems.any { it.id == spec.bottomSmall.id },
-                                                isSelectionMode = isSelectionMode,
-                                                onSelectToggle = {
-                                                    if (!isSelectionMode) isSelectionMode = true
-                                                    toggleSelection(spec.bottomSmall)
-                                                },
-                                                onClick = {
-                                                    if (isSelectionMode) {
-                                                        toggleSelection(spec.bottomSmall)
-                                                    } else {
-                                                        onMediaClick(filteredMediaList, filteredMediaList.indexOf(spec.bottomSmall))
-                                                    }
-                                                },
-                                                onPreviewTrigger = { previewItem = it }
-                                            )
-                                        }
-                                        if (gridColumns >= 4) {
-                                            val spaceWeight = gridColumns - 3
-                                            Spacer(modifier = Modifier.weight(spaceWeight.toFloat()))
-                                        }
-                                    }
-                                }
-                                is BentoRowSpec.LargeRight -> {
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                    ) {
-                                        Column(
-                                            modifier = Modifier.weight(1f),
-                                            verticalArrangement = Arrangement.spacedBy(8.dp)
-                                        ) {
-                                            BentoImageTile(
-                                                item = spec.topSmall,
-                                                modifier = Modifier.fillMaxWidth().aspectRatio(1f),
-                                                isSelected = selectedItems.any { it.id == spec.topSmall.id },
-                                                isSelectionMode = isSelectionMode,
-                                                onSelectToggle = {
-                                                    if (!isSelectionMode) isSelectionMode = true
-                                                    toggleSelection(spec.topSmall)
-                                                },
-                                                onClick = {
-                                                    if (isSelectionMode) {
-                                                        toggleSelection(spec.topSmall)
-                                                    } else {
-                                                        onMediaClick(filteredMediaList, filteredMediaList.indexOf(spec.topSmall))
-                                                    }
-                                                },
-                                                onPreviewTrigger = { previewItem = it }
-                                            )
-                                            BentoImageTile(
-                                                item = spec.bottomSmall,
-                                                modifier = Modifier.fillMaxWidth().aspectRatio(1f),
-                                                isSelected = selectedItems.any { it.id == spec.bottomSmall.id },
-                                                isSelectionMode = isSelectionMode,
-                                                onSelectToggle = {
-                                                    if (!isSelectionMode) isSelectionMode = true
-                                                    toggleSelection(spec.bottomSmall)
-                                                },
-                                                onClick = {
-                                                    if (isSelectionMode) {
-                                                        toggleSelection(spec.bottomSmall)
-                                                    } else {
-                                                        onMediaClick(filteredMediaList, filteredMediaList.indexOf(spec.bottomSmall))
-                                                    }
-                                                },
-                                                onPreviewTrigger = { previewItem = it }
-                                            )
-                                        }
-                                        BentoImageTile(
-                                            item = spec.large,
-                                            modifier = Modifier.weight(2f).aspectRatio(0.96f),
-                                            isSelected = selectedItems.any { it.id == spec.large.id },
-                                            isSelectionMode = isSelectionMode,
-                                            onSelectToggle = {
-                                                if (!isSelectionMode) isSelectionMode = true
-                                                toggleSelection(spec.large)
-                                            },
-                                            onClick = {
-                                                if (isSelectionMode) {
-                                                    toggleSelection(spec.large)
-                                                } else {
-                                                    onMediaClick(filteredMediaList, filteredMediaList.indexOf(spec.large))
-                                                }
-                                            },
-                                            onPreviewTrigger = { previewItem = it }
-                                        )
-                                        if (gridColumns >= 4) {
-                                            val spaceWeight = gridColumns - 3
-                                            Spacer(modifier = Modifier.weight(spaceWeight.toFloat()))
+                                    val emptySlots = 5 - rowItems.size
+                                    if (emptySlots > 0) {
+                                        repeat(emptySlots) {
+                                            Spacer(modifier = Modifier.weight(1f))
                                         }
                                     }
                                 }
@@ -860,7 +1044,32 @@ fun PhotosScreen(
     }
 }
 
-// Bento Image Tile Renderer
+// Memory Spotlight Card spec class
+private data class MemoryCardInfo(
+    val title: String,
+    val coverUri: Uri,
+    val subtitle: String
+)
+
+// Reusable Date Header Composable
+@Composable
+private fun DateHeader(text: String) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(MaterialTheme.colorScheme.background)
+            .padding(vertical = 8.dp)
+    ) {
+        Text(
+            text = text,
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.Bold,
+            color = MaterialTheme.colorScheme.onBackground
+        )
+    }
+}
+
+// Bento Image Tile Renderer with Smart Content-Aware Cropping Heuristics
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun BentoImageTile(
@@ -873,6 +1082,22 @@ private fun BentoImageTile(
     onPreviewTrigger: (MediaItem?) -> Unit
 ) {
     val coroutineScope = rememberCoroutineScope()
+
+    // Heuristics-based focal-point cropping to prevent cutting off heads/text
+    val smartAlignment = remember(item) {
+        when {
+            // Keep top visible for screenshots/docs to ensure text headings are readable
+            item.bucketName.contains("Screenshot", ignoreCase = true) ||
+            item.name.contains("Screenshot", ignoreCase = true) ||
+            item.mimeType.contains("document", ignoreCase = true) -> Alignment.TopCenter
+            
+            // Shift crop box slightly up for portrait photos/selfies to preserve faces/eyes/hairlines
+            item.width > 0 && item.height > 0 && item.width < item.height -> BiasAlignment(0f, -0.35f)
+            
+            else -> Alignment.Center
+        }
+    }
+
     Box(
         modifier = modifier
             .clip(RoundedCornerShape(12.dp))
@@ -914,7 +1139,8 @@ private fun BentoImageTile(
             model = item.uri,
             contentDescription = item.name,
             modifier = Modifier.fillMaxSize(),
-            contentScale = ContentScale.Crop
+            contentScale = ContentScale.Crop,
+            alignment = smartAlignment
         )
 
         if (item.isVideo) {
@@ -940,13 +1166,6 @@ private fun BentoImageTile(
         }
     }
 }
-
-// Memory Spotlight Card spec class
-private data class MemoryCardInfo(
-    val title: String,
-    val coverUri: Uri,
-    val subtitle: String
-)
 
 // Dynamic Bento Grid Packing Algorithm
 private fun packItemsIntoBentoRows(items: List<MediaItem>, columns: Int): List<BentoRowSpec> {
@@ -1006,6 +1225,29 @@ private fun packItemsIntoBentoRows(items: List<MediaItem>, columns: Int): List<B
         }
     }
     return specs
+}
+
+// Proportional Justified Row height packing algorithm (zero cropping row layout)
+private fun packJustifiedRows(items: List<MediaItem>, targetRatioSum: Float = 2.8f): List<List<MediaItem>> {
+    val rows = mutableListOf<List<MediaItem>>()
+    var currentRow = mutableListOf<MediaItem>()
+    var currentRatioSum = 0f
+
+    for (item in items) {
+        val ratio = if (item.width > 0 && item.height > 0) item.width.toFloat() / item.height.toFloat() else 1f
+        val clampedRatio = ratio.coerceIn(0.6f, 2.2f)
+        currentRow.add(item)
+        currentRatioSum += clampedRatio
+        if (currentRatioSum >= targetRatioSum) {
+            rows.add(currentRow)
+            currentRow = mutableListOf()
+            currentRatioSum = 0f
+        }
+    }
+    if (currentRow.isNotEmpty()) {
+        rows.add(currentRow)
+    }
+    return rows
 }
 
 // Helpers

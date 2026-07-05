@@ -104,6 +104,11 @@ fun MainApp(
         mutableStateOf(prefs.getString("update_channel", "stable") ?: "stable") 
     }
 
+    // Layout Mode preference (Adaptive Bento, Masonry, Justified, Square, Compact)
+    var layoutMode by remember { 
+        mutableStateOf(prefs.getString("layout_mode", "bento") ?: "bento") 
+    }
+
     // Search query states
     var searchQuery by remember { mutableStateOf("") }
     var isSearchExpanded by remember { mutableStateOf(false) }
@@ -421,6 +426,7 @@ fun MainApp(
                             0 -> PhotosScreen(
                                 mediaList = filteredMediaList,
                                 gridColumns = gridColumns,
+                                layoutMode = layoutMode,
                                 onColumnsChange = { cols ->
                                     gridColumns = cols
                                     prefs.edit().putInt(KEY_COLUMNS, cols).apply()
@@ -619,17 +625,43 @@ fun MainApp(
                                                         }
                                                     )
                                                     DropdownMenuItem(
-                                                        text = { Text("Sort: Date Taken") },
+                                                        text = { Text("Layout: Adaptive Bento") },
                                                         onClick = {
                                                             showOverflowMenu = false
-                                                            Toast.makeText(context, "Sorted by Date Taken", Toast.LENGTH_SHORT).show()
+                                                            layoutMode = "bento"
+                                                            prefs.edit().putString("layout_mode", "bento").apply()
                                                         }
                                                     )
                                                     DropdownMenuItem(
-                                                        text = { Text("Sort: Recently Added") },
+                                                        text = { Text("Layout: Masonry Staggered") },
                                                         onClick = {
                                                             showOverflowMenu = false
-                                                            Toast.makeText(context, "Sorted by Recently Added", Toast.LENGTH_SHORT).show()
+                                                            layoutMode = "masonry"
+                                                            prefs.edit().putString("layout_mode", "masonry").apply()
+                                                        }
+                                                    )
+                                                    DropdownMenuItem(
+                                                        text = { Text("Layout: Justified Gallery") },
+                                                        onClick = {
+                                                            showOverflowMenu = false
+                                                            layoutMode = "justified"
+                                                            prefs.edit().putString("layout_mode", "justified").apply()
+                                                        }
+                                                    )
+                                                    DropdownMenuItem(
+                                                        text = { Text("Layout: Uniform Square") },
+                                                        onClick = {
+                                                            showOverflowMenu = false
+                                                            layoutMode = "square"
+                                                            prefs.edit().putString("layout_mode", "square").apply()
+                                                        }
+                                                    )
+                                                    DropdownMenuItem(
+                                                        text = { Text("Layout: Compact Timeline") },
+                                                        onClick = {
+                                                            showOverflowMenu = false
+                                                            layoutMode = "compact"
+                                                            prefs.edit().putString("layout_mode", "compact").apply()
                                                         }
                                                     )
                                                     DropdownMenuItem(

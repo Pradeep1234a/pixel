@@ -709,14 +709,29 @@ fun PhotosScreen(
                                         modifier = Modifier.fillMaxWidth(),
                                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                                     ) {
-                                        colLists.forEach { colItems ->
+                                        val activeCols = colLists.count { it.isNotEmpty() }
+                                        val totalHt = colLists.indices.sumOf { c ->
+                                            colLists[c].sumOf { item ->
+                                                val aspect = if (item.width > 0 && item.height > 0) item.width.toFloat() / item.height.toFloat() else 1f
+                                                (1.0 / aspect.coerceIn(0.6f, 1.8f))
+                                            }
+                                        }.toFloat()
+                                        val targetHt = if (activeCols > 0) totalHt / activeCols else 1f
+
+                                        colLists.forEachIndexed { colIndex, colItems ->
                                             Column(
                                                 modifier = Modifier.weight(1f),
                                                 verticalArrangement = Arrangement.spacedBy(8.dp)
                                             ) {
+                                                val colHt = colItems.sumOf { item ->
+                                                    val aspect = if (item.width > 0 && item.height > 0) item.width.toFloat() / item.height.toFloat() else 1f
+                                                    (1.0 / aspect.coerceIn(0.6f, 1.8f))
+                                                }.toFloat()
+                                                val scaleFactor = if (colHt > 0f) (targetHt / colHt).coerceIn(0.85f, 1.15f) else 1f
+
                                                 colItems.forEach { item ->
                                                     val aspect = if (item.width > 0 && item.height > 0) item.width.toFloat() / item.height.toFloat() else 1f
-                                                    val tileAspect = aspect.coerceIn(0.65f, 1.5f)
+                                                    val tileAspect = (aspect.coerceIn(0.65f, 1.5f) / scaleFactor).coerceIn(0.6f, 1.8f)
                                                     
                                                     BentoImageTile(
                                                         item = item,

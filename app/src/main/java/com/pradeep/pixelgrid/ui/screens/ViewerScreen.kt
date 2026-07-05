@@ -116,6 +116,34 @@ fun ViewerScreen(
     val thumbBaseSizePx = with(density) { thumbBaseSizeDp.toPx() }
     val thumbSpacingPx = with(density) { thumbSpacingDp.toPx() }
 
+    // Real-time calculation of active focus index for floating preview and delayed selection
+    val floatIndex = pagerState.currentPage + pagerState.currentPageOffsetFraction
+    val centeredItemIndex = floatIndex.roundToInt().coerceIn(0, mediaList.lastIndex)
+    val centeredItem = mediaList.getOrNull(centeredItemIndex)
+
+    // Sync filmstrip drag/scrolling to pager in real-time
+    val filmstripCenteredIndex by remember {
+        derivedStateOf {
+            val visibleItems = filmstripListState.layoutInfo.visibleItemsInfo
+            if (visibleItems.isNotEmpty() && filmstripRowWidthPx > 0) {
+                val viewportCenter = filmstripRowWidthPx / 2f
+                val closestItem = visibleItems.minByOrNull {
+                    val itemCenter = it.offset + it.size / 2f
+                    abs(itemCenter - viewportCenter)
+                }
+                closestItem?.index ?: pagerState.currentPage
+            } else {
+                pagerState.currentPage
+            }
+        }
+    }
+
+    LaunchedEffect(filmstripCenteredIndex) {
+        if (filmstripListState.isScrollInProgress && filmstripCenteredIndex != -1 && filmstripCenteredIndex != pagerState.currentPage) {
+            pagerState.scrollToPage(filmstripCenteredIndex)
+        }
+    }
+
     // Track scrolling state to implement delayed selection highlight
     LaunchedEffect(pagerState.isScrollInProgress, filmstripListState.isScrollInProgress) {
         val isMoving = pagerState.isScrollInProgress || filmstripListState.isScrollInProgress
@@ -312,7 +340,75 @@ fun ViewerScreen(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                // 1. Premium Filmstrip with distance-based scaling
+                // 1. Floating Preview above the filmstrip, perfectly synchronized with swiping/dragging
+                if (centeredItem != null) {
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = Color.Black.copy(alpha = 0.75f),
+                        modifier = Modifier
+                            .padding(bottom = 4.dp)
+                            .wrapContentWidth()
+                            .height(52.dp)
+                            .border(1.dp, Color.White.copy(alpha = 0.15f), RoundedCornerShape(12.dp))
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .padding(horizontal = 8.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            // Sliding mini preview matching main image
+                            HorizontalPager(
+                                state = pagerState,
+                                modifier = Modifier
+                                    .size(40.dp)
+                                    .clip(RoundedCornerShape(6.dp)),
+                                userScrollEnabled = false
+                            ) { page ->
+                                val item = mediaList.getOrNull(page)
+                                if (item != null) {
+                                    val context = LocalContext.current
+                                    val previewModel = remember(item) {
+                                        if (item.isVideo) {
+                                            ImageRequest.Builder(context)
+                                                .data(item.uri)
+                                                .videoFrameMillis(1000)
+                                                .build()
+                                        } else {
+                                            item.uri as Any
+                                        }
+                                    }
+                                    AsyncImage(
+                                        model = previewModel,
+                                        contentDescription = null,
+                                        modifier = Modifier.fillMaxSize(),
+                                        contentScale = ContentScale.Crop
+                                    )
+                                }
+                            }
+
+                            // Center focused details text
+                            Column(
+                                modifier = Modifier.padding(end = 4.dp),
+                                verticalArrangement = Arrangement.Center
+                            ) {
+                                Text(
+                                    text = formatHeaderDate(centeredItem.dateAdded),
+                                    style = MaterialTheme.typography.labelLarge.copy(fontSize = 12.sp),
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color.White
+                                )
+                                Text(
+                                    text = formatHeaderTime(centeredItem.dateAdded),
+                                    style = MaterialTheme.typography.bodySmall.copy(fontSize = 10.sp),
+                                    color = Color.White.copy(alpha = 0.6f)
+                                )
+                            }
+                        }
+                    }
+                }
+
+                // 2. Premium Filmstrip with distance-based scaling
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()

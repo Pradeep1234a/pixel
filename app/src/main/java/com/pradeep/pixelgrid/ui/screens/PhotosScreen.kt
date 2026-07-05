@@ -198,19 +198,7 @@ fun PhotosScreen(
         }
     }
 
-    // Precompute Smart Masonry rows using the same intelligent Bento packing logic
-    val masonryRows = remember(groupedMedia, gridColumns) {
-        groupedMedia.mapValues { (_, items) ->
-            packItemsIntoBentoRows(items, gridColumns)
-        }
-    }
 
-    // Precompute Justified Gallery rows
-    val justifiedRows = remember(groupedMedia) {
-        groupedMedia.mapValues { (_, items) ->
-            packJustifiedRows(items)
-        }
-    }
 
     // Precompute Uniform Square rows
     val squareRows = remember(groupedMedia, gridColumns) {
@@ -669,44 +657,9 @@ fun PhotosScreen(
                                                     onPreviewTrigger = { previewItem = it }
                                                 )
                                             }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    else if (layoutMode == "masonry") {
-                        masonryRows.forEach { (dateHeader, rows) ->
-                            stickyHeader { DateHeader(dateHeader) }
-                            items(rows) { spec ->
-                                val spacing = 8.dp
-                                when (spec) {
-                                    is BentoRowSpec.DenseRow -> {
-                                        Row(
-                                            modifier = Modifier.fillMaxWidth(),
-                                            horizontalArrangement = Arrangement.spacedBy(spacing)
-                                        ) {
-                                            spec.items.forEach { (item, span) ->
-                                                BentoImageTile(
-                                                    item = item,
-                                                    modifier = Modifier
-                                                        .weight(span.toFloat())
-                                                        .aspectRatio(span * 0.75f),
-                                                    isSelected = selectedItems.any { it.id == item.id },
-                                                    isSelectionMode = isSelectionMode,
-                                                    onSelectToggle = {
-                                                        if (!isSelectionMode) isSelectionMode = true
-                                                        toggleSelection(item)
-                                                    },
-                                                    onClick = {
-                                                        if (isSelectionMode) {
-                                                            toggleSelection(item)
-                                                        } else {
-                                                            onMediaClick(filteredMediaList, filteredMediaList.indexOf(item))
-                                                        }
-                                                    },
-                                                    onPreviewTrigger = { previewItem = it }
-                                                )
+                                            val totalSpan = spec.items.sumOf { it.second }
+                                            if (totalSpan < gridColumns) {
+                                                Spacer(modifier = Modifier.weight((gridColumns - totalSpan).toFloat()))
                                             }
                                         }
                                     }
@@ -714,50 +667,7 @@ fun PhotosScreen(
                             }
                         }
                     }
-                    else if (layoutMode == "justified") {
-                        justifiedRows.forEach { (dateHeader, rows) ->
-                            stickyHeader { DateHeader(dateHeader) }
-                            items(rows) { rowItems ->
-                                val spacing = 8.dp
-                                val screenWidth = LocalConfiguration.current.screenWidthDp.dp
-                                
-                                val ratios = rowItems.map { item ->
-                                    val r = if (item.width > 0 && item.height > 0) item.width.toFloat() / item.height.toFloat() else 1f
-                                    r.coerceIn(0.6f, 2.2f)
-                                }
-                                val ratioSum = ratios.sum()
-                                val m = rowItems.size
-                                val rowHeight = (screenWidth - (spacing * (m - 1))) / ratioSum
-                                
-                                Row(
-                                    modifier = Modifier.fillMaxWidth().height(rowHeight),
-                                    horizontalArrangement = Arrangement.spacedBy(spacing)
-                                ) {
-                                    rowItems.forEachIndexed { index, item ->
-                                        val weight = ratios[index]
-                                        BentoImageTile(
-                                            item = item,
-                                            modifier = Modifier.weight(weight).fillMaxHeight(),
-                                            isSelected = selectedItems.any { it.id == item.id },
-                                            isSelectionMode = isSelectionMode,
-                                            onSelectToggle = {
-                                                if (!isSelectionMode) isSelectionMode = true
-                                                toggleSelection(item)
-                                            },
-                                            onClick = {
-                                                if (isSelectionMode) {
-                                                    toggleSelection(item)
-                                                } else {
-                                                    onMediaClick(filteredMediaList, filteredMediaList.indexOf(item))
-                                                }
-                                            },
-                                            onPreviewTrigger = { previewItem = it }
-                                        )
-                                    }
-                                }
-                            }
-                        }
-                    }
+
                     else if (layoutMode == "square") {
                         squareRows.forEach { (dateHeader, rows) ->
                             stickyHeader { DateHeader(dateHeader) }
@@ -1068,141 +978,94 @@ private fun packItemsIntoBentoRows(items: List<MediaItem>, columns: Int): List<B
     val specs = mutableListOf<BentoRowSpec>()
     var i = 0
     val n = items.size
-    var patternIndex = 0
 
     while (i < n) {
-        val remaining = n - i
-        
-        // If remaining items cannot complete a full row pattern, pack them as a final balanced row
-        if (remaining < columns) {
+        val remainingItems = n - i
+
+        // If it's the last few items (leftovers), handle them content-aware and intelligently!
+        if (remainingItems < columns) {
             val finalItems = mutableListOf<Pair<MediaItem, Int>>()
-            val R = remaining
-            val baseSpan = columns / R
-            val remainder = columns % R
+            var totalSpanUsed = 0
             var idx = 0
-            while (i < n) {
-                val span = if (idx < remainder) baseSpan + 1 else baseSpan
-                finalItems.add(Pair(items[i], span))
-                i++
-                idx++
+            
+            // Analyze leftover items and assign spans
+            val tempLeftovers = mutableListOf<Pair<MediaItem, Float>>()
+            var hasPortraits = false
+            var tempI = i
+            while (tempI < n) {
+                val item = items[tempI]
+                val aspect = if (item.width > 0 && item.height > 0) item.width.toFloat() / item.height.toFloat() else 1f
+                if (aspect < 0.85f) {
+                    hasPortraits = true
+                }
+                tempLeftovers.add(Pair(item, aspect))
+                tempI++
+            }
+
+            // Decide whether to force stretching or keep them left-aligned
+            // Rule: If any leftover item is portrait, or if we have very few items in a wide grid,
+            // we leave them left-aligned at their natural spans to prevent ugly cropping / distorted shapes.
+            val shouldLeftAlign = hasPortraits || (remainingItems <= 2 && columns >= 3)
+
+            if (shouldLeftAlign) {
+                // Keep them naturally aligned to the left using natural spans (mostly span 1 or 2)
+                while (i < n) {
+                    val item = items[i]
+                    val aspect = if (item.width > 0 && item.height > 0) item.width.toFloat() / item.height.toFloat() else 1f
+                    val preferredSpan = when {
+                        aspect > 1.3f && columns - totalSpanUsed >= 2 -> 2
+                        else -> 1
+                    }
+                    finalItems.add(Pair(item, preferredSpan))
+                    totalSpanUsed += preferredSpan
+                    i++
+                }
+            } else {
+                // Otherwise, distribute spans mathematically to fill the row perfectly
+                val R = remainingItems
+                val baseSpan = columns / R
+                val remainder = columns % R
+                while (i < n) {
+                    val span = if (idx < remainder) baseSpan + 1 else baseSpan
+                    finalItems.add(Pair(items[i], span))
+                    i++
+                    idx++
+                }
             }
             specs.add(BentoRowSpec.DenseRow(finalItems))
             break
         }
 
-        // Get row pattern based on columns count
-        val spans = when (columns) {
-            1 -> listOf(1)
-            2 -> {
-                val pattern = patternIndex % 3
-                patternIndex++
-                if (pattern == 2) listOf(2) else listOf(1, 1)
-            }
-            3 -> {
-                val pattern = patternIndex % 5
-                patternIndex++
-                when (pattern) {
-                    1 -> listOf(2, 1)
-                    2 -> listOf(1, 2)
-                    4 -> listOf(3)
-                    else -> listOf(1, 1, 1)
-                }
-            }
-            4 -> {
-                val pattern = patternIndex % 6
-                patternIndex++
-                when (pattern) {
-                    1 -> listOf(2, 1, 1)
-                    2 -> listOf(1, 1, 2)
-                    3 -> listOf(2, 2)
-                    5 -> listOf(4)
-                    else -> listOf(1, 1, 1, 1)
-                }
-            }
-            5 -> {
-                val pattern = patternIndex % 7
-                patternIndex++
-                when (pattern) {
-                    1 -> listOf(2, 1, 1, 1)
-                    2 -> listOf(1, 1, 1, 2)
-                    3 -> listOf(2, 1, 2)
-                    4 -> listOf(3, 1, 1)
-                    5 -> listOf(1, 1, 3)
-                    else -> listOf(1, 1, 1, 1, 1)
-                }
-            }
-            else -> { // columns >= 6
-                val pattern = patternIndex % 8
-                patternIndex++
-                when (pattern) {
-                    1 -> listOf(2, 1, 1, 1, 1)
-                    2 -> listOf(1, 1, 1, 1, 2)
-                    3 -> listOf(2, 2, 1, 1)
-                    4 -> listOf(1, 1, 2, 2)
-                    5 -> listOf(3, 1, 1, 1)
-                    6 -> listOf(1, 1, 1, 3)
-                    else -> listOf(1, 1, 1, 1, 1, 1)
-                }
-            }
-        }
-
-        // Add items to row using spans
+        // Normal packing row: pack items greedily up to column capacity
         val rowItems = mutableListOf<Pair<MediaItem, Int>>()
-        var canComplete = true
-        var tempI = i
-        for (span in spans) {
-            if (tempI < n) {
-                rowItems.add(Pair(items[tempI], span))
-                tempI++
+        var currentCapacity = columns
+        
+        while (i < n && currentCapacity > 0) {
+            val item = items[i]
+            val aspect = if (item.width > 0 && item.height > 0) item.width.toFloat() / item.height.toFloat() else 1f
+            
+            // Content-aware span determination:
+            val preferredSpan = when {
+                aspect > 1.8f && currentCapacity >= 3 -> 3
+                aspect > 1.25f && currentCapacity >= 2 -> 2
+                else -> 1
+            }
+            
+            // Upgrade favorite highlights to span 2 if column count permits
+            val finalSpan = if (item.isFavorite && preferredSpan == 1 && currentCapacity >= 2 && columns >= 3) {
+                2
             } else {
-                canComplete = false
-                break
+                preferredSpan
             }
+            
+            rowItems.add(Pair(item, finalSpan))
+            currentCapacity -= finalSpan
+            i++
         }
-
-        if (canComplete) {
-            specs.add(BentoRowSpec.DenseRow(rowItems))
-            i = tempI
-        } else {
-            val finalItems = mutableListOf<Pair<MediaItem, Int>>()
-            val R = n - i
-            val baseSpan = columns / R
-            val remainder = columns % R
-            var idx = 0
-            while (i < n) {
-                val span = if (idx < remainder) baseSpan + 1 else baseSpan
-                finalItems.add(Pair(items[i], span))
-                i++
-                idx++
-            }
-            specs.add(BentoRowSpec.DenseRow(finalItems))
-        }
+        
+        specs.add(BentoRowSpec.DenseRow(rowItems))
     }
-
     return specs
-}
-
-// Proportional Justified Row height packing algorithm (zero cropping row layout)
-private fun packJustifiedRows(items: List<MediaItem>, targetRatioSum: Float = 2.8f): List<List<MediaItem>> {
-    val rows = mutableListOf<List<MediaItem>>()
-    var currentRow = mutableListOf<MediaItem>()
-    var currentRatioSum = 0f
-
-    for (item in items) {
-        val ratio = if (item.width > 0 && item.height > 0) item.width.toFloat() / item.height.toFloat() else 1f
-        val clampedRatio = ratio.coerceIn(0.6f, 2.2f)
-        currentRow.add(item)
-        currentRatioSum += clampedRatio
-        if (currentRatioSum >= targetRatioSum) {
-            rows.add(currentRow)
-            currentRow = mutableListOf()
-            currentRatioSum = 0f
-        }
-    }
-    if (currentRow.isNotEmpty()) {
-        rows.add(currentRow)
-    }
-    return rows
 }
 
 // Helpers

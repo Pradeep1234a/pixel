@@ -634,22 +634,6 @@ fun MainApp(
                                                             }
                                                         )
                                                         DropdownMenuItem(
-                                                            text = { Text("Layout: Masonry Staggered") },
-                                                            onClick = {
-                                                                showOverflowMenu = false
-                                                                layoutMode = "masonry"
-                                                                prefs.edit().putString("layout_mode", "masonry").apply()
-                                                            }
-                                                        )
-                                                        DropdownMenuItem(
-                                                            text = { Text("Layout: Justified Gallery") },
-                                                            onClick = {
-                                                                showOverflowMenu = false
-                                                                layoutMode = "justified"
-                                                                prefs.edit().putString("layout_mode", "justified").apply()
-                                                            }
-                                                        )
-                                                        DropdownMenuItem(
                                                             text = { Text("Layout: Uniform Square") },
                                                             onClick = {
                                                                 showOverflowMenu = false

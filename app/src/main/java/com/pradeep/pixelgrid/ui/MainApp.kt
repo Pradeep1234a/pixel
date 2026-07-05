@@ -404,11 +404,7 @@ fun MainApp(
                         }
                     } else {
                         val statusBarHeight = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
-                        val topPaddingValue = if (isSearchExpanded) {
-                            56.dp + statusBarHeight
-                        } else {
-                            96.dp + statusBarHeight
-                        }
+                        val topPaddingValue = 56.dp + statusBarHeight
 
                         val filteredMediaList = remember(mediaList, searchQuery) {
                             if (searchQuery.isBlank()) {
@@ -496,11 +492,7 @@ fun MainApp(
                             else -> "Settings"
                         }
                         val statusBarHeight = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
-                        val totalHeaderHeight = if (isSearchExpanded) {
-                            statusBarHeight + 56.dp
-                        } else {
-                            statusBarHeight + (96f - (40f * scrollFraction)).dp
-                        }
+                        val totalHeaderHeight = statusBarHeight + 56.dp
 
                         Column(
                             modifier = Modifier
@@ -569,14 +561,14 @@ fun MainApp(
                                     } else {
                                         Row(
                                             modifier = Modifier
-                                                .align(Alignment.TopStart)
-                                                .padding(top = (16f + (32f * (1f - scrollFraction))).dp),
+                                                .align(Alignment.CenterStart)
+                                                .height(56.dp),
                                             verticalAlignment = Alignment.CenterVertically,
                                             horizontalArrangement = Arrangement.spacedBy(8.dp)
                                         ) {
                                             Text(
                                                 text = activeTitle,
-                                                fontSize = (28f - (10f * scrollFraction)).sp,
+                                                fontSize = (32f - (12f * scrollFraction)).sp,
                                                 fontWeight = FontWeight.Bold,
                                                 color = MaterialTheme.colorScheme.onBackground
                                             )

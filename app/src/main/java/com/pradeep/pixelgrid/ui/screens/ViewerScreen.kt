@@ -5,6 +5,7 @@ import android.net.Uri
 import android.view.ViewGroup
 import android.widget.FrameLayout
 import androidx.annotation.OptIn
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateFloatAsState
@@ -102,6 +103,15 @@ fun ViewerScreen(
     var showInfoDrawer by remember { mutableStateOf(false) }
     var isZoomed by remember { mutableStateOf(false) }
     var dragDismissFraction by remember { mutableStateOf(0f) }
+
+    // Intercept system back button/gesture to prevent app exit, returning to grid instead
+    BackHandler(enabled = true) {
+        if (showInfoDrawer) {
+            showInfoDrawer = false
+        } else {
+            onBack()
+        }
+    }
 
     // Set up horizontal pager state
     val pagerState = rememberPagerState(initialPage = initialIndex, pageCount = { mediaList.size })

@@ -400,7 +400,12 @@ fun ViewerScreen(
             visible = showUi,
             enter = slideInVertically(initialOffsetY = { -it }) + fadeIn(),
             exit = slideOutVertically(targetOffsetY = { -it }) + fadeOut(),
-            modifier = Modifier.align(Alignment.TopCenter)
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .graphicsLayer {
+                    alpha = (1f - dragDismissFraction * 3f).coerceIn(0f, 1f)
+                    translationY = -dragDismissFraction * 150f
+                }
         ) {
             Surface(
                 color = headerColor,
@@ -444,6 +449,10 @@ fun ViewerScreen(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .navigationBarsPadding()
+                .graphicsLayer {
+                    alpha = (1f - dragDismissFraction * 3f).coerceIn(0f, 1f)
+                    translationY = dragDismissFraction * 150f
+                }
         ) {
             Column(
                 modifier = Modifier

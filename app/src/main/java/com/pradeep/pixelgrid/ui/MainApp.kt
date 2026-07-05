@@ -704,8 +704,8 @@ fun MainApp(
             // --- FULL SCREEN OVERLAY VIEW SCREEN ---
             AnimatedVisibility(
                 visible = viewerInitialIndex != -1,
-                enter = fadeIn(animationSpec = tween(250)) + slideInVertically(initialOffsetY = { it / 3 }, animationSpec = tween(250)),
-                exit = fadeOut(animationSpec = tween(200)) + slideOutVertically(targetOffsetY = { it / 3 }, animationSpec = tween(200))
+                enter = fadeIn(animationSpec = tween(300)),
+                exit = fadeOut(animationSpec = tween(300))
             ) {
                 key(viewerInitialIndex) {
                     if (viewerInitialIndex != -1) {

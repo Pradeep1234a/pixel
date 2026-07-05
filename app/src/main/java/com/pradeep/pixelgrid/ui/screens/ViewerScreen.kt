@@ -340,13 +340,21 @@ fun ViewerScreen(
                             }
                         }
                         .graphicsLayer {
+                            // Calculate current page scrolling translation offset
+                            val pageOffset = ((pagerState.currentPage - page) + pagerState.currentPageOffsetFraction)
+                            
                             translationY = verticalOffsetY + exitOffsetY
-                            // Scale down slightly as user drags down to dismiss, creating standard gallery pop-out feel
+                            
+                            // 1. Combine drag-to-dismiss scale, exit transition scale, and horizontal pager swipe scale
                             val dragScale = (1f - (abs(verticalOffsetY) / 3000f)).coerceIn(0.85f, 1f)
-                            val finalScale = dragScale * exitScale
+                            val pagerScale = 1f - (abs(pageOffset) * 0.12f).coerceIn(0f, 0.12f) // smooth scale down as page moves away
+                            val finalScale = dragScale * exitScale * pagerScale
                             scaleX = finalScale
                             scaleY = finalScale
-                            alpha = exitAlpha * (1f - dragDismissFraction)
+                            
+                            // 2. Combine swipe-down drag opacity, exit animation fade, and horizontal swipe page fade
+                            val pagerAlpha = 1f - (abs(pageOffset) * 0.45f).coerceIn(0f, 0.45f) // smooth fade out as page moves away
+                            alpha = exitAlpha * (1f - dragDismissFraction) * pagerAlpha
                         }
                 ) {
                     if (pageItem.isVideo) {

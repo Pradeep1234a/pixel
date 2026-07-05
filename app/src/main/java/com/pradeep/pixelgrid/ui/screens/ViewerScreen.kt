@@ -23,6 +23,10 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.calculatePan
+import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -51,6 +55,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.PointerInputScope
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
@@ -563,6 +568,30 @@ private fun InfoRow(label: String, value: String) {
     }
 }
 
+// Custom transform gesture detector that only consumes pointer events during pinch zoom (2+ fingers)
+// or when the image is already zoomed, letting single-finger horizontal swipes bubble up to HorizontalPager
+private suspend fun PointerInputScope.detectZoomPanGestures(
+    onGesture: (pan: Offset, zoom: Float) -> Unit
+) {
+    awaitEachGesture {
+        awaitFirstDown(requireUnconsumed = false)
+        do {
+            val event = awaitPointerEvent()
+            val canceled = event.changes.any { it.isConsumed }
+            if (!canceled) {
+                val zoom = event.calculateZoom()
+                val pan = event.calculatePan()
+                
+                // Consume event and invoke gesture only if zooming (2+ fingers) or zoom change is active
+                if (event.changes.size >= 2 || zoom != 1f) {
+                    event.changes.forEach { it.consume() }
+                    onGesture(pan, zoom)
+                }
+            }
+        } while (event.changes.any { it.pressed })
+    }
+}
+
 // Pinch-to-zoom interactive ImageViewer with zoom lock callback
 // Gesture handling is carefully structured to not interfere with HorizontalPager swipe
 @Composable
@@ -591,16 +620,33 @@ private fun ImageViewer(
                     translationX = offset.x,
                     translationY = offset.y
                 )
-                .pointerInput(Unit) {
-                    detectTransformGestures { _, pan, zoom, _ ->
-                        scale = (scale * zoom).coerceIn(1f, 5f)
-                        if (scale > 1.05f) {
-                            offset += pan
-                            onScaleChanged(true)
-                        } else {
-                            scale = 1f
-                            offset = Offset.Zero
-                            onScaleChanged(false)
+                .pointerInput(scale) {
+                    if (scale > 1f) {
+                        // When zoomed in, consume pan/zoom gestures normally
+                        detectTransformGestures { _, pan, zoom, _ ->
+                            scale = (scale * zoom).coerceIn(1f, 5f)
+                            if (scale > 1.05f) {
+                                offset += pan
+                                onScaleChanged(true)
+                            } else {
+                                scale = 1f
+                                offset = Offset.Zero
+                                onScaleChanged(false)
+                            }
+                        }
+                    } else {
+                        // When not zoomed, use custom detector to only consume pinch-to-zoom (2+ fingers)
+                        // and let single finger drags pass through to HorizontalPager
+                        detectZoomPanGestures { pan, zoom ->
+                            scale = (scale * zoom).coerceIn(1f, 5f)
+                            if (scale > 1.05f) {
+                                offset += pan
+                                onScaleChanged(true)
+                            } else {
+                                scale = 1f
+                                offset = Offset.Zero
+                                onScaleChanged(false)
+                            }
                         }
                     }
                 }

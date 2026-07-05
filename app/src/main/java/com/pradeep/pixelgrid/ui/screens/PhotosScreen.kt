@@ -198,10 +198,10 @@ fun PhotosScreen(
         }
     }
 
-    // Precompute Staggered Masonry chunks of 30 items
-    val masonryChunks = remember(groupedMedia) {
+    // Precompute Smart Masonry rows using the same intelligent Bento packing logic
+    val masonryRows = remember(groupedMedia, gridColumns) {
         groupedMedia.mapValues { (_, items) ->
-            items.chunked(30)
+            packItemsIntoBentoRows(items, gridColumns)
         }
     }
 
@@ -676,104 +676,37 @@ fun PhotosScreen(
                         }
                     }
                     else if (layoutMode == "masonry") {
-                        masonryChunks.forEach { (dateHeader, chunks) ->
+                        masonryRows.forEach { (dateHeader, rows) ->
                             stickyHeader { DateHeader(dateHeader) }
-                            
-                            chunks.forEach { chunkItems ->
-                                item {
-                                    val colLists = remember(chunkItems, gridColumns) {
-                                        val portraits = chunkItems.filter {
-                                            val aspect = if (it.width > 0 && it.height > 0) it.width.toFloat() / it.height.toFloat() else 1f
-                                            aspect < 0.8f
-                                        }
-                                        val landscapes = chunkItems.filter {
-                                            val aspect = if (it.width > 0 && it.height > 0) it.width.toFloat() / it.height.toFloat() else 1f
-                                            aspect > 1.2f
-                                        }
-                                        val squares = chunkItems.filter {
-                                            val aspect = if (it.width > 0 && it.height > 0) it.width.toFloat() / it.height.toFloat() else 1f
-                                            aspect in 0.8f..1.2f
-                                        }
-
-                                        val balancedItems = mutableListOf<MediaItem>()
-                                        var pIdx = 0
-                                        var lIdx = 0
-                                        var sIdx = 0
-                                        val totalSize = chunkItems.size
-                                        while (balancedItems.size < totalSize) {
-                                            if (pIdx < portraits.size) balancedItems.add(portraits[pIdx++])
-                                            if (lIdx < landscapes.size) balancedItems.add(landscapes[lIdx++])
-                                            if (sIdx < squares.size) balancedItems.add(squares[sIdx++])
-                                        }
-
-                                        val lists = List(gridColumns) { mutableListOf<MediaItem>() }
-                                        val heights = FloatArray(gridColumns) { 0f }
-                                        for (item in balancedItems) {
-                                            val aspect = if (item.width > 0 && item.height > 0) item.width.toFloat() / item.height.toFloat() else 1f
-                                            val clampedAspect = aspect.coerceIn(0.6f, 1.8f)
-                                            val heightWeight = 1.0f / clampedAspect
-                                            
-                                            var minCol = 0
-                                            var minH = heights[0]
-                                            for (c in 1 until gridColumns) {
-                                                if (heights[c] < minH) {
-                                                    minH = heights[c]
-                                                    minCol = c
-                                                }
-                                            }
-                                            lists[minCol].add(item)
-                                            heights[minCol] += heightWeight
-                                        }
-                                        lists
-                                    }
-
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                    ) {
-                                        val activeCols = colLists.count { it.isNotEmpty() }
-                                        val totalHt = colLists.indices.sumOf { c ->
-                                            colLists[c].sumOf { item ->
-                                                val aspect = if (item.width > 0 && item.height > 0) item.width.toFloat() / item.height.toFloat() else 1f
-                                                (1.0 / aspect.coerceIn(0.6f, 1.8f))
-                                            }
-                                        }.toFloat()
-                                        val targetHt = if (activeCols > 0) totalHt / activeCols else 1f
-
-                                        colLists.forEachIndexed { colIndex, colItems ->
-                                            Column(
-                                                modifier = Modifier.weight(1f),
-                                                verticalArrangement = Arrangement.spacedBy(8.dp)
-                                            ) {
-                                                val colHt = colItems.sumOf { item ->
-                                                    val aspect = if (item.width > 0 && item.height > 0) item.width.toFloat() / item.height.toFloat() else 1f
-                                                    (1.0 / aspect.coerceIn(0.6f, 1.8f))
-                                                }.toFloat()
-                                                val scaleFactor = if (colHt > 0f) (targetHt / colHt).coerceIn(0.85f, 1.15f) else 1f
-
-                                                colItems.forEach { item ->
-                                                    val aspect = if (item.width > 0 && item.height > 0) item.width.toFloat() / item.height.toFloat() else 1f
-                                                    val tileAspect = (aspect.coerceIn(0.65f, 1.5f) / scaleFactor).coerceIn(0.6f, 1.8f)
-                                                    
-                                                    BentoImageTile(
-                                                        item = item,
-                                                        modifier = Modifier.fillMaxWidth().aspectRatio(tileAspect),
-                                                        isSelected = selectedItems.any { it.id == item.id },
-                                                        isSelectionMode = isSelectionMode,
-                                                        onSelectToggle = {
-                                                            if (!isSelectionMode) isSelectionMode = true
+                            items(rows) { spec ->
+                                val spacing = 8.dp
+                                when (spec) {
+                                    is BentoRowSpec.DenseRow -> {
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.spacedBy(spacing)
+                                        ) {
+                                            spec.items.forEach { (item, span) ->
+                                                BentoImageTile(
+                                                    item = item,
+                                                    modifier = Modifier
+                                                        .weight(span.toFloat())
+                                                        .aspectRatio(span * 0.75f),
+                                                    isSelected = selectedItems.any { it.id == item.id },
+                                                    isSelectionMode = isSelectionMode,
+                                                    onSelectToggle = {
+                                                        if (!isSelectionMode) isSelectionMode = true
+                                                        toggleSelection(item)
+                                                    },
+                                                    onClick = {
+                                                        if (isSelectionMode) {
                                                             toggleSelection(item)
-                                                        },
-                                                        onClick = {
-                                                            if (isSelectionMode) {
-                                                                toggleSelection(item)
-                                                            } else {
-                                                                onMediaClick(filteredMediaList, filteredMediaList.indexOf(item))
-                                                            }
-                                                        },
-                                                        onPreviewTrigger = { previewItem = it }
-                                                    )
-                                                }
+                                                        } else {
+                                                            onMediaClick(filteredMediaList, filteredMediaList.indexOf(item))
+                                                        }
+                                                    },
+                                                    onPreviewTrigger = { previewItem = it }
+                                                )
                                             }
                                         }
                                     }
@@ -1143,9 +1076,15 @@ private fun packItemsIntoBentoRows(items: List<MediaItem>, columns: Int): List<B
         // If remaining items cannot complete a full row pattern, pack them as a final balanced row
         if (remaining < columns) {
             val finalItems = mutableListOf<Pair<MediaItem, Int>>()
+            val R = remaining
+            val baseSpan = columns / R
+            val remainder = columns % R
+            var idx = 0
             while (i < n) {
-                finalItems.add(Pair(items[i], 1))
+                val span = if (idx < remainder) baseSpan + 1 else baseSpan
+                finalItems.add(Pair(items[i], span))
                 i++
+                idx++
             }
             specs.add(BentoRowSpec.DenseRow(finalItems))
             break
@@ -1226,9 +1165,15 @@ private fun packItemsIntoBentoRows(items: List<MediaItem>, columns: Int): List<B
             i = tempI
         } else {
             val finalItems = mutableListOf<Pair<MediaItem, Int>>()
+            val R = n - i
+            val baseSpan = columns / R
+            val remainder = columns % R
+            var idx = 0
             while (i < n) {
-                finalItems.add(Pair(items[i], 1))
+                val span = if (idx < remainder) baseSpan + 1 else baseSpan
+                finalItems.add(Pair(items[i], span))
                 i++
+                idx++
             }
             specs.add(BentoRowSpec.DenseRow(finalItems))
         }

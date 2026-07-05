@@ -165,16 +165,6 @@ fun ViewerScreen(
     }
     val animatedBgColor by animateColorAsState(targetBgColor, animationSpec = tween(300))
 
-    // Dynamic layout paddings to center image below header / above footer in normal mode, expanding edge-to-edge in fullscreen
-    val statusBarHeight = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
-    val navBarHeight = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
-    
-    val targetTopPadding = if (showUi) 56.dp + statusBarHeight else 0.dp
-    val targetBottomPadding = if (showUi) 108.dp + navBarHeight else 0.dp
-    
-    val animatedTopPadding by animateDpAsState(targetTopPadding, animationSpec = tween(300))
-    val animatedBottomPadding by animateDpAsState(targetBottomPadding, animationSpec = tween(300))
-
     // Theme content colors
     val headerColor = if (darkTheme) Color.Black.copy(alpha = 0.8f) else MaterialTheme.colorScheme.surface
     val headerContentColor = if (darkTheme) Color.White else MaterialTheme.colorScheme.onSurface
@@ -195,11 +185,9 @@ fun ViewerScreen(
         ) { page ->
             val pageItem = mediaList.getOrNull(page)
             if (pageItem != null) {
-                // Image container padded to start below header/above footer in normal mode, expanding to full screen smoothly
+                // Image container remains locked in full screen bounds (zero layout shifts on UI changes)
                 Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(top = animatedTopPadding, bottom = animatedBottomPadding)
+                    modifier = Modifier.fillMaxSize()
                 ) {
                     if (pageItem.isVideo) {
                         VideoPlayer(

@@ -65,6 +65,8 @@ import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.graphics.ColorMatrix
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.PointerInputScope
 import androidx.compose.ui.layout.ContentScale
@@ -780,7 +782,6 @@ private suspend fun PointerInputScope.detectPremiumTransformGestures(
                 }
             }
         } while (event.changes.any { it.pressed })
-        
         if (isTransforming) {
             onGestureEnd()
         }
@@ -796,6 +797,7 @@ private fun ImageViewer(
     onScaleChanged: (Boolean) -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
     var containerSize by remember { mutableStateOf(IntSize.Zero) }
 
@@ -814,109 +816,156 @@ private fun ImageViewer(
         onScaleChanged(isCurrentlyZoomed)
     }
 
+    // Dynamic on-demand loading of the original resolution bitmap to preserve absolute sharpness up to 10x
+    val loadHighRes = currentScale > 1.05f
+    val highResRequest = remember(uri) {
+        ImageRequest.Builder(context)
+            .data(uri)
+            .size(coil.size.Size.ORIGINAL)
+            .crossfade(true)
+            .build()
+    }
+
+    // Dynamic ColorFilter to progressively enhance clarity, contrast, and edge sharpness at higher zoom levels
+    val progressiveDetailFilter = remember(currentScale) {
+        if (currentScale > 1.05f) {
+            val scaleDiff = currentScale - 1f
+            // Progressively adjust contrast and saturation to make fine details pop
+            val contrast = 1f + 0.035f * scaleDiff.coerceIn(0f, 9f) // up to +31.5% contrast enhancement at 10x zoom
+            val saturation = 1f + 0.015f * scaleDiff.coerceIn(0f, 9f) // up to +13.5% saturation for detail visibility
+            
+            val matrix = ColorMatrix().apply { setToSaturation(saturation) }
+            val t = (1f - contrast) / 2f
+            val contrastMatrix = ColorMatrix(
+                floatArrayOf(
+                    contrast, 0f, 0f, 0f, t * 255f,
+                    0f, contrast, 0f, 0f, t * 255f,
+                    0f, 0f, contrast, 0f, t * 255f,
+                    0f, 0f, 0f, 1f, 0f
+                )
+            )
+            matrix *= contrastMatrix
+            ColorFilter.colorMatrix(matrix)
+        } else {
+            null
+        }
+    }
+
     Box(
         modifier = modifier
             .fillMaxSize()
-            .onGloballyPositioned { containerSize = it.size },
+            .onGloballyPositioned { containerSize = it.size }
+            .graphicsLayer(
+                scaleX = currentScale,
+                scaleY = currentScale,
+                translationX = currentOffsetX,
+                translationY = currentOffsetY,
+                rotationZ = currentRotation
+            )
+            .pointerInput(Unit) {
+                detectPremiumTransformGestures(
+                    onGesture = { _, pan, zoom, rotationChange ->
+                        coroutineScope.launch {
+                            val nextScale = (scaleAnim.value * zoom).coerceIn(0.5f, 15f)
+                            scaleAnim.snapTo(nextScale)
+                            rotationAnim.snapTo(rotationAnim.value + rotationChange)
+                            offsetXAnim.snapTo(offsetXAnim.value + pan.x)
+                            offsetYAnim.snapTo(offsetYAnim.value + pan.y)
+                        }
+                    },
+                    onGestureEnd = {
+                        coroutineScope.launch {
+                            val rawRotation = rotationAnim.value
+                            val snappedRotation = (rawRotation / 90f).roundToInt() * 90f
+                            
+                            val targetScale = when {
+                                scaleAnim.value < 1f -> 1f
+                                scaleAnim.value > 10f -> 10f
+                                else -> scaleAnim.value
+                            }
+                            
+                            val boxWidth = containerSize.width.toFloat()
+                            val boxHeight = containerSize.height.toFloat()
+                            
+                            val maxOffsetX = (boxWidth * (targetScale - 1f)).coerceAtLeast(0f) / 2f
+                            val maxOffsetY = (boxHeight * (targetScale - 1f)).coerceAtLeast(0f) / 2f
+                            
+                            val targetOffsetX = offsetXAnim.value.coerceIn(-maxOffsetX, maxOffsetX)
+                            val targetOffsetY = offsetYAnim.value.coerceIn(-maxOffsetY, maxOffsetY)
+                            
+                            launch {
+                                scaleAnim.animateTo(
+                                    targetValue = targetScale,
+                                    animationSpec = spring(
+                                        stiffness = Spring.StiffnessMediumLow,
+                                        dampingRatio = Spring.DampingRatioLowBouncy
+                                    )
+                                )
+                            }
+                            launch {
+                                offsetXAnim.animateTo(
+                                    targetValue = if (targetScale == 1f) 0f else targetOffsetX,
+                                    animationSpec = spring(stiffness = Spring.StiffnessMediumLow)
+                                )
+                            }
+                            launch {
+                                offsetYAnim.animateTo(
+                                    targetValue = if (targetScale == 1f) 0f else targetOffsetY,
+                                    animationSpec = spring(stiffness = Spring.StiffnessMediumLow)
+                                )
+                            }
+                            launch {
+                                rotationAnim.animateTo(
+                                    targetValue = snappedRotation,
+                                    animationSpec = spring(
+                                        stiffness = Spring.StiffnessMediumLow,
+                                        dampingRatio = Spring.DampingRatioLowBouncy
+                                    )
+                                )
+                            }
+                        }
+                    }
+                )
+            }
+            .pointerInput(Unit) {
+                detectTapGestures(
+                    onTap = { onTap() },
+                    onDoubleTap = {
+                        coroutineScope.launch {
+                            if (scaleAnim.value > 1f) {
+                                launch { scaleAnim.animateTo(1f, spring(stiffness = Spring.StiffnessMediumLow)) }
+                                launch { offsetXAnim.animateTo(0f, spring(stiffness = Spring.StiffnessMediumLow)) }
+                                launch { offsetYAnim.animateTo(0f, spring(stiffness = Spring.StiffnessMediumLow)) }
+                                launch { rotationAnim.animateTo(0f, spring(stiffness = Spring.StiffnessMediumLow)) }
+                            } else {
+                                launch { scaleAnim.animateTo(3f, spring(stiffness = Spring.StiffnessMediumLow)) }
+                                launch { rotationAnim.animateTo(0f, spring(stiffness = Spring.StiffnessMediumLow)) }
+                            }
+                        }
+                    }
+                )
+            },
         contentAlignment = Alignment.Center
     ) {
+        // Base screen-fit image loaded instantly (memory-light)
         AsyncImage(
             model = uri,
             contentDescription = name,
-            modifier = Modifier
-                .fillMaxSize()
-                .graphicsLayer(
-                    scaleX = currentScale,
-                    scaleY = currentScale,
-                    translationX = currentOffsetX,
-                    translationY = currentOffsetY,
-                    rotationZ = currentRotation
-                )
-                .pointerInput(Unit) {
-                    detectPremiumTransformGestures(
-                        onGesture = { _, pan, zoom, rotationChange ->
-                            coroutineScope.launch {
-                                val nextScale = (scaleAnim.value * zoom).coerceIn(0.5f, 8f)
-                                scaleAnim.snapTo(nextScale)
-                                rotationAnim.snapTo(rotationAnim.value + rotationChange)
-                                offsetXAnim.snapTo(offsetXAnim.value + pan.x)
-                                offsetYAnim.snapTo(offsetYAnim.value + pan.y)
-                            }
-                        },
-                        onGestureEnd = {
-                            coroutineScope.launch {
-                                val rawRotation = rotationAnim.value
-                                val snappedRotation = (rawRotation / 90f).roundToInt() * 90f
-                                
-                                val targetScale = when {
-                                    scaleAnim.value < 1f -> 1f
-                                    scaleAnim.value > 5f -> 5f
-                                    else -> scaleAnim.value
-                                }
-                                
-                                val boxWidth = containerSize.width.toFloat()
-                                val boxHeight = containerSize.height.toFloat()
-                                
-                                val maxOffsetX = (boxWidth * (targetScale - 1f)).coerceAtLeast(0f) / 2f
-                                val maxOffsetY = (boxHeight * (targetScale - 1f)).coerceAtLeast(0f) / 2f
-                                
-                                val targetOffsetX = offsetXAnim.value.coerceIn(-maxOffsetX, maxOffsetX)
-                                val targetOffsetY = offsetYAnim.value.coerceIn(-maxOffsetY, maxOffsetY)
-                                
-                                launch {
-                                    scaleAnim.animateTo(
-                                        targetValue = targetScale,
-                                        animationSpec = spring(
-                                            stiffness = Spring.StiffnessMediumLow,
-                                            dampingRatio = Spring.DampingRatioLowBouncy
-                                        )
-                                    )
-                                }
-                                launch {
-                                    offsetXAnim.animateTo(
-                                        targetValue = if (targetScale == 1f) 0f else targetOffsetX,
-                                        animationSpec = spring(stiffness = Spring.StiffnessMediumLow)
-                                    )
-                                }
-                                launch {
-                                    offsetYAnim.animateTo(
-                                        targetValue = if (targetScale == 1f) 0f else targetOffsetY,
-                                        animationSpec = spring(stiffness = Spring.StiffnessMediumLow)
-                                    )
-                                }
-                                launch {
-                                    rotationAnim.animateTo(
-                                        targetValue = snappedRotation,
-                                        animationSpec = spring(
-                                            stiffness = Spring.StiffnessMediumLow,
-                                            dampingRatio = Spring.DampingRatioLowBouncy
-                                        )
-                                    )
-                                }
-                            }
-                        }
-                    )
-                }
-                .pointerInput(Unit) {
-                    detectTapGestures(
-                        onTap = { onTap() },
-                        onDoubleTap = {
-                            coroutineScope.launch {
-                                if (scaleAnim.value > 1f) {
-                                    launch { scaleAnim.animateTo(1f, spring(stiffness = Spring.StiffnessMediumLow)) }
-                                    launch { offsetXAnim.animateTo(0f, spring(stiffness = Spring.StiffnessMediumLow)) }
-                                    launch { offsetYAnim.animateTo(0f, spring(stiffness = Spring.StiffnessMediumLow)) }
-                                    launch { rotationAnim.animateTo(0f, spring(stiffness = Spring.StiffnessMediumLow)) }
-                                } else {
-                                    launch { scaleAnim.animateTo(2.5f, spring(stiffness = Spring.StiffnessMediumLow)) }
-                                    launch { rotationAnim.animateTo(0f, spring(stiffness = Spring.StiffnessMediumLow)) }
-                                }
-                            }
-                        }
-                    )
-                },
-            contentScale = ContentScale.Fit
+            modifier = Modifier.fillMaxSize(),
+            contentScale = ContentScale.Fit,
+            colorFilter = progressiveDetailFilter
         )
+        
+        // Original size high-res image layered on top when zoomed
+        if (loadHighRes) {
+            AsyncImage(
+                model = highResRequest,
+                contentDescription = name,
+                modifier = Modifier.fillMaxSize(),
+                contentScale = ContentScale.Fit,
+                colorFilter = progressiveDetailFilter
+            )
+        }
     }
 }
 

@@ -33,6 +33,8 @@ import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.calculatePan
 import androidx.compose.foundation.gestures.calculateZoom
+import androidx.compose.foundation.gestures.calculateRotation
+import androidx.compose.foundation.gestures.calculateCentroid
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -753,32 +755,39 @@ fun ViewerScreen(
     }
 }
 
-// Custom transform gesture detector that only consumes pointer events during pinch zoom (2+ fingers)
-// or when the image is already zoomed, letting single-finger horizontal swipes bubble up to HorizontalPager
-private suspend fun PointerInputScope.detectZoomPanGestures(
-    onGesture: (pan: Offset, zoom: Float) -> Unit
+// Custom transform gesture detector that supports simultaneous pan, zoom, and rotation
+// and bubbles single-finger scrolls up to the pager/vertical details view when not zoomed.
+private suspend fun PointerInputScope.detectPremiumTransformGestures(
+    onGesture: (centroid: Offset, pan: Offset, zoom: Float, rotation: Float) -> Unit,
+    onGestureEnd: () -> Unit
 ) {
     awaitEachGesture {
         awaitFirstDown(requireUnconsumed = false)
+        var isTransforming = false
         do {
             val event = awaitPointerEvent()
             val canceled = event.changes.any { it.isConsumed }
             if (!canceled) {
                 val zoom = event.calculateZoom()
                 val pan = event.calculatePan()
+                val rotation = event.calculateRotation()
                 
-                // Consume event and invoke gesture only if zooming (2+ fingers) or zoom change is active
-                if (event.changes.size >= 2 || zoom != 1f) {
+                if (event.changes.size >= 2 || zoom != 1f || rotation != 0f || pan != Offset.Zero) {
+                    isTransforming = true
                     event.changes.forEach { it.consume() }
-                    onGesture(pan, zoom)
+                    val centroid = event.calculateCentroid()
+                    onGesture(centroid, pan, zoom, rotation)
                 }
             }
         } while (event.changes.any { it.pressed })
+        
+        if (isTransforming) {
+            onGestureEnd()
+        }
     }
 }
 
-// Pinch-to-zoom interactive ImageViewer with zoom lock callback
-// Gesture handling is carefully structured to not interfere with HorizontalPager swipe
+// Pinch-to-zoom, rotate, and pan interactive ImageViewer with spring settle animations
 @Composable
 private fun ImageViewer(
     uri: Uri,
@@ -787,11 +796,28 @@ private fun ImageViewer(
     onScaleChanged: (Boolean) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    var scale by remember { mutableStateOf(1f) }
-    var offset by remember { mutableStateOf(Offset.Zero) }
+    val coroutineScope = rememberCoroutineScope()
+    var containerSize by remember { mutableStateOf(IntSize.Zero) }
+
+    val scaleAnim = remember { Animatable(1f) }
+    val offsetXAnim = remember { Animatable(0f) }
+    val offsetYAnim = remember { Animatable(0f) }
+    val rotationAnim = remember { Animatable(0f) }
+
+    val currentScale = scaleAnim.value
+    val currentOffsetX = offsetXAnim.value
+    val currentOffsetY = offsetYAnim.value
+    val currentRotation = rotationAnim.value
+
+    val isCurrentlyZoomed = currentScale > 1.05f
+    LaunchedEffect(isCurrentlyZoomed) {
+        onScaleChanged(isCurrentlyZoomed)
+    }
 
     Box(
-        modifier = modifier.fillMaxSize(),
+        modifier = modifier
+            .fillMaxSize()
+            .onGloballyPositioned { containerSize = it.size },
         contentAlignment = Alignment.Center
     ) {
         AsyncImage(
@@ -800,52 +826,91 @@ private fun ImageViewer(
             modifier = Modifier
                 .fillMaxSize()
                 .graphicsLayer(
-                    scaleX = scale,
-                    scaleY = scale,
-                    translationX = offset.x,
-                    translationY = offset.y
+                    scaleX = currentScale,
+                    scaleY = currentScale,
+                    translationX = currentOffsetX,
+                    translationY = currentOffsetY,
+                    rotationZ = currentRotation
                 )
-                .pointerInput(scale) {
-                    if (scale > 1f) {
-                        // When zoomed in, consume pan/zoom gestures normally
-                        detectTransformGestures { _, pan, zoom, _ ->
-                            scale = (scale * zoom).coerceIn(1f, 5f)
-                            if (scale > 1.05f) {
-                                offset += pan
-                                onScaleChanged(true)
-                            } else {
-                                scale = 1f
-                                offset = Offset.Zero
-                                onScaleChanged(false)
+                .pointerInput(Unit) {
+                    detectPremiumTransformGestures(
+                        onGesture = { _, pan, zoom, rotationChange ->
+                            coroutineScope.launch {
+                                val nextScale = (scaleAnim.value * zoom).coerceIn(0.5f, 8f)
+                                scaleAnim.snapTo(nextScale)
+                                rotationAnim.snapTo(rotationAnim.value + rotationChange)
+                                offsetXAnim.snapTo(offsetXAnim.value + pan.x)
+                                offsetYAnim.snapTo(offsetYAnim.value + pan.y)
+                            }
+                        },
+                        onGestureEnd = {
+                            coroutineScope.launch {
+                                val rawRotation = rotationAnim.value
+                                val snappedRotation = (rawRotation / 90f).roundToInt() * 90f
+                                
+                                val targetScale = when {
+                                    scaleAnim.value < 1f -> 1f
+                                    scaleAnim.value > 5f -> 5f
+                                    else -> scaleAnim.value
+                                }
+                                
+                                val boxWidth = containerSize.width.toFloat()
+                                val boxHeight = containerSize.height.toFloat()
+                                
+                                val maxOffsetX = (boxWidth * (targetScale - 1f)).coerceAtLeast(0f) / 2f
+                                val maxOffsetY = (boxHeight * (targetScale - 1f)).coerceAtLeast(0f) / 2f
+                                
+                                val targetOffsetX = offsetXAnim.value.coerceIn(-maxOffsetX, maxOffsetX)
+                                val targetOffsetY = offsetYAnim.value.coerceIn(-maxOffsetY, maxOffsetY)
+                                
+                                launch {
+                                    scaleAnim.animateTo(
+                                        targetValue = targetScale,
+                                        animationSpec = spring(
+                                            stiffness = Spring.StiffnessMediumLow,
+                                            dampingRatio = Spring.DampingRatioLowBouncy
+                                        )
+                                    )
+                                }
+                                launch {
+                                    offsetXAnim.animateTo(
+                                        targetValue = if (targetScale == 1f) 0f else targetOffsetX,
+                                        animationSpec = spring(stiffness = Spring.StiffnessMediumLow)
+                                    )
+                                }
+                                launch {
+                                    offsetYAnim.animateTo(
+                                        targetValue = if (targetScale == 1f) 0f else targetOffsetY,
+                                        animationSpec = spring(stiffness = Spring.StiffnessMediumLow)
+                                    )
+                                }
+                                launch {
+                                    rotationAnim.animateTo(
+                                        targetValue = snappedRotation,
+                                        animationSpec = spring(
+                                            stiffness = Spring.StiffnessMediumLow,
+                                            dampingRatio = Spring.DampingRatioLowBouncy
+                                        )
+                                    )
+                                }
                             }
                         }
-                    } else {
-                        // When not zoomed, use custom detector to only consume pinch-to-zoom (2+ fingers)
-                        // and let single finger drags pass through to HorizontalPager
-                        detectZoomPanGestures { pan, zoom ->
-                            scale = (scale * zoom).coerceIn(1f, 5f)
-                            if (scale > 1.05f) {
-                                offset += pan
-                                onScaleChanged(true)
-                            } else {
-                                scale = 1f
-                                offset = Offset.Zero
-                                onScaleChanged(false)
-                            }
-                        }
-                    }
+                    )
                 }
                 .pointerInput(Unit) {
                     detectTapGestures(
                         onTap = { onTap() },
                         onDoubleTap = {
-                            if (scale > 1f) {
-                                scale = 1f
-                                offset = Offset.Zero
-                                onScaleChanged(false)
-                            } else {
-                                scale = 2.5f
-                                onScaleChanged(true)
+                            coroutineScope.launch {
+                                if (scaleAnim.value > 1f) {
+                                    launch { scaleAnim.animateTo(1f, spring(stiffness = Spring.StiffnessMediumLow)) }
+                                    launch { offsetXAnim.animateTo(0f, spring(stiffness = Spring.StiffnessMediumLow)) }
+                                    launch { offsetYAnim.animateTo(0f, spring(stiffness = Spring.StiffnessMediumLow)) }
+                                    launch { rotationAnim.animateTo(0f, spring(stiffness = Spring.StiffnessMediumLow)) }
+                                } else {
+                                    launch { scaleAnim.animateTo(2.5f, spring(stiffness = Spring.StiffnessMediumLow)) }
+                                    launch { rotationAnim.animateTo(0f, spring(stiffness = Spring.StiffnessMediumLow)) }
+                                }
                             }
                         }
                     )

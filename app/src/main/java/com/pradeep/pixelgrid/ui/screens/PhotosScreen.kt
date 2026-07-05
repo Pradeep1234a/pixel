@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.widget.Toast
+import kotlin.math.abs
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.IntentSenderRequest
 import androidx.activity.result.contract.ActivityResultContracts
@@ -428,14 +429,104 @@ fun PhotosScreen(
         recommended
     }
 
+    // Helpers to track focal item and adjust scroll position during pinch-to-zoom reflowing
+    val findFocalMediaItem = remember(filteredMediaList, layoutMode, bentoRows, squareRows) {
+        {
+            val layoutInfo = lazyListState.layoutInfo
+            val visibleItems = layoutInfo.visibleItemsInfo
+            if (visibleItems.isEmpty()) {
+                null
+            } else {
+                val viewportMiddle = (layoutInfo.viewportStartOffset + layoutInfo.viewportEndOffset) / 2
+                val middleRow = visibleItems.minByOrNull { itemInfo: androidx.compose.foundation.lazy.LazyListItemInfo -> 
+                    abs((itemInfo.offset + itemInfo.size / 2) - viewportMiddle) 
+                }
+                if (middleRow != null) {
+                    val flatIndex = middleRow.index
+                    var mediaItem: MediaItem? = null
+                    var currentIndex = 1 // Skip carousels header at index 0
+                    
+                    outer@ for ((_, rows) in (if (layoutMode == "bento") bentoRows else squareRows)) {
+                        if (flatIndex == currentIndex) {
+                            mediaItem = rows.firstOrNull()?.let { spec ->
+                                if (spec is BentoRowSpec.DenseRow) spec.items.firstOrNull()?.first else null
+                            } ?: (rows.firstOrNull() as? List<*>)?.firstOrNull() as? MediaItem
+                            break@outer
+                        }
+                        currentIndex += 1
+                        
+                        for (spec in rows) {
+                            if (flatIndex == currentIndex) {
+                                mediaItem = if (spec is BentoRowSpec.DenseRow) {
+                                    spec.items.firstOrNull()?.first
+                                } else {
+                                    (spec as? List<*>)?.firstOrNull() as? MediaItem
+                                }
+                                break@outer
+                            }
+                            currentIndex += 1
+                        }
+                    }
+                    mediaItem ?: filteredMediaList.firstOrNull()
+                } else {
+                    null
+                }
+            }
+        }
+    }
+
+    val getLazyListIndexForMediaId = remember(groupedMedia, layoutMode) {
+        { mediaId: Long, cols: Int ->
+            var currentIndex = 1 // Skip carousels header
+            var foundIndex: Int? = null
+            
+            if (layoutMode == "bento") {
+                val targetBentoRows = groupedMedia.mapValues { (_, items) ->
+                    packItemsIntoBentoRows(items, cols)
+                }
+                outer@ for ((_, rows) in targetBentoRows) {
+                    currentIndex += 1
+                    for (rowIndex in rows.indices) {
+                        val spec = rows[rowIndex]
+                        if (spec is BentoRowSpec.DenseRow) {
+                            if (spec.items.any { it.first.id == mediaId }) {
+                                foundIndex = currentIndex
+                                break@outer
+                            }
+                        }
+                        currentIndex += 1
+                    }
+                }
+            } else if (layoutMode == "square") {
+                val targetSquareRows = groupedMedia.mapValues { (_, items) ->
+                    items.chunked(cols)
+                }
+                outer@ for ((_, rows) in targetSquareRows) {
+                    currentIndex += 1
+                    for (rowIndex in rows.indices) {
+                        val rowItems = rows[rowIndex]
+                        if (rowItems.any { it.id == mediaId }) {
+                            foundIndex = currentIndex
+                            break@outer
+                        }
+                        currentIndex += 1
+                    }
+                }
+            }
+            foundIndex
+        }
+    }
+
     // Pinch-to-Zoom grid column gesture tracker with buttery continuous scale and spring snap
     val gridScaleAnim = remember { Animatable(1f) }
     var isPinching by remember { mutableStateOf(false) }
+    var lastColumnsChangeTime by remember { mutableStateOf(0L) }
 
     val pinchModifier = Modifier.pointerInput(gridColumns, layoutMode) {
         if (layoutMode != "justified" && layoutMode != "compact") {
             awaitEachGesture {
                 awaitFirstDown(requireUnconsumed = false)
+                isPinching = false
                 do {
                     val event = awaitPointerEvent()
                     val canceled = event.changes.any { it.isConsumed }
@@ -443,21 +534,50 @@ fun PhotosScreen(
                         isPinching = true
                         val zoom = event.calculateZoom()
                         coroutineScope.launch {
-                            gridScaleAnim.snapTo((gridScaleAnim.value * zoom).coerceIn(0.6f, 1.8f))
+                            gridScaleAnim.snapTo((gridScaleAnim.value * zoom).coerceIn(0.5f, 2.0f))
+                        }
+                        
+                        val now = System.currentTimeMillis()
+                        if (now - lastColumnsChangeTime > 450L) {
+                            val currentScale = gridScaleAnim.value
+                            var targetColumns = gridColumns
+                            if (currentScale > 1.25f && gridColumns > 1) {
+                                targetColumns = gridColumns - 1
+                            } else if (currentScale < 0.75f && gridColumns < 6) {
+                                targetColumns = gridColumns + 1
+                            }
+                            
+                            if (targetColumns != gridColumns) {
+                                lastColumnsChangeTime = now
+                                val scaleCompensation = targetColumns.toFloat() / gridColumns.toFloat()
+                                val focalItem = findFocalMediaItem()
+                                
+                                onColumnsChange(targetColumns)
+                                
+                                coroutineScope.launch {
+                                    gridScaleAnim.snapTo((gridScaleAnim.value * scaleCompensation).coerceIn(0.5f, 2.0f))
+                                    if (focalItem != null) {
+                                        val targetIndex = getLazyListIndexForMediaId(focalItem.id, targetColumns)
+                                        if (targetIndex != null) {
+                                            lazyListState.scrollToItem(targetIndex, 0)
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
                 } while (event.changes.any { it.pressed })
 
                 if (isPinching) {
                     isPinching = false
-                    val finalZoom = gridScaleAnim.value
-                    if (finalZoom > 1.25f && gridColumns > 1) {
-                        onColumnsChange(gridColumns - 1)
-                    } else if (finalZoom < 0.75f && gridColumns < 6) {
-                        onColumnsChange(gridColumns + 1)
-                    }
                     coroutineScope.launch {
-                        gridScaleAnim.animateTo(1f, spring(stiffness = Spring.StiffnessMediumLow))
+                        gridScaleAnim.animateTo(
+                            targetValue = 1f,
+                            animationSpec = spring(
+                                stiffness = Spring.StiffnessMediumLow,
+                                dampingRatio = Spring.DampingRatioLowBouncy
+                            )
+                        )
                     }
                 }
             }
@@ -1046,89 +1166,100 @@ private fun packItemsIntoBentoRows(items: List<MediaItem>, columns: Int): List<B
     val specs = mutableListOf<BentoRowSpec>()
     var i = 0
     val n = items.size
+    var alternateLeft = false
 
     while (i < n) {
-        val remainingItems = n - i
-
-        // If it's the last few items (leftovers), handle them content-aware and intelligently!
-        if (remainingItems < columns) {
-            val finalItems = mutableListOf<Pair<MediaItem, Int>>()
-            var totalSpanUsed = 0
-            var idx = 0
-            
-            // Analyze leftover items and assign spans
-            val tempLeftovers = mutableListOf<Pair<MediaItem, Float>>()
-            var hasPortraits = false
-            var tempI = i
-            while (tempI < n) {
-                val item = items[tempI]
-                val aspect = if (item.width > 0 && item.height > 0) item.width.toFloat() / item.height.toFloat() else 1f
-                if (aspect < 0.85f) {
-                    hasPortraits = true
-                }
-                tempLeftovers.add(Pair(item, aspect))
-                tempI++
-            }
-
-            // Decide whether to force stretching or keep them left-aligned
-            // Rule: If any leftover item is portrait, or if we have very few items in a wide grid,
-            // we leave them left-aligned at their natural spans to prevent ugly cropping / distorted shapes.
-            val shouldLeftAlign = hasPortraits || (remainingItems <= 2 && columns >= 3)
-
-            if (shouldLeftAlign) {
-                // Keep them naturally aligned to the left using natural spans (mostly span 1 or 2)
-                while (i < n) {
-                    val item = items[i]
-                    val aspect = if (item.width > 0 && item.height > 0) item.width.toFloat() / item.height.toFloat() else 1f
-                    val preferredSpan = when {
-                        aspect > 1.3f && columns - totalSpanUsed >= 2 -> 2
-                        else -> 1
-                    }
-                    finalItems.add(Pair(item, preferredSpan))
-                    totalSpanUsed += preferredSpan
-                    i++
-                }
-            } else {
-                // Otherwise, distribute spans mathematically to fill the row perfectly
-                val R = remainingItems
-                val baseSpan = columns / R
-                val remainder = columns % R
-                while (i < n) {
-                    val span = if (idx < remainder) baseSpan + 1 else baseSpan
-                    finalItems.add(Pair(items[i], span))
-                    i++
-                    idx++
-                }
-            }
-            specs.add(BentoRowSpec.DenseRow(finalItems))
-            break
-        }
-
-        // Normal packing row: pack items greedily up to column capacity
         val rowItems = mutableListOf<Pair<MediaItem, Int>>()
-        var currentCapacity = columns
+        var currentSpanSum = 0
         
-        while (i < n && currentCapacity > 0) {
+        // Accumulate items for the current row
+        val rowCandidates = mutableListOf<MediaItem>()
+        while (i < n && currentSpanSum < columns) {
             val item = items[i]
             val aspect = if (item.width > 0 && item.height > 0) item.width.toFloat() / item.height.toFloat() else 1f
             
-            // Content-aware span determination:
-            val preferredSpan = when {
-                aspect > 1.8f && currentCapacity >= 3 -> 3
-                aspect > 1.25f && currentCapacity >= 2 -> 2
+            // Highlight favorites as span 2 if columns count allows
+            val idealSpan = when {
+                item.isFavorite && columns >= 3 -> 2
+                aspect >= 1.75f && columns >= 3 -> 3
+                aspect >= 1.2f && columns >= 2 -> 2
                 else -> 1
             }
             
-            // Upgrade favorite highlights to span 2 if column count permits
-            val finalSpan = if (item.isFavorite && preferredSpan == 1 && currentCapacity >= 2 && columns >= 3) {
-                2
-            } else {
-                preferredSpan
+            val clampedIdeal = idealSpan.coerceAtMost(columns)
+            rowCandidates.add(item)
+            currentSpanSum += clampedIdeal
+            i++
+        }
+        
+        // Now adjust the spans of candidates to fit the row capacity exactly
+        if (currentSpanSum == columns) {
+            rowCandidates.forEach { item ->
+                val aspect = if (item.width > 0 && item.height > 0) item.width.toFloat() / item.height.toFloat() else 1f
+                val idealSpan = when {
+                    item.isFavorite && columns >= 3 -> 2
+                    aspect >= 1.75f && columns >= 3 -> 3
+                    aspect >= 1.2f && columns >= 2 -> 2
+                    else -> 1
+                }.coerceAtMost(columns)
+                rowItems.add(Pair(item, idealSpan))
+            }
+        } else if (currentSpanSum > columns) {
+            val candidateSpans = rowCandidates.map { item ->
+                val aspect = if (item.width > 0 && item.height > 0) item.width.toFloat() / item.height.toFloat() else 1f
+                val idealSpan = when {
+                    item.isFavorite && columns >= 3 -> 2
+                    aspect >= 1.75f && columns >= 3 -> 3
+                    aspect >= 1.2f && columns >= 2 -> 2
+                    else -> 1
+                }.coerceAtMost(columns)
+                idealSpan
+            }.toMutableList()
+            
+            var excess = currentSpanSum - columns
+            while (excess > 0) {
+                var bestReduceIdx = -1
+                var maxSpan = 1
+                for (j in candidateSpans.indices) {
+                    if (candidateSpans[j] > maxSpan) {
+                        maxSpan = candidateSpans[j]
+                        bestReduceIdx = j
+                    }
+                }
+                
+                if (bestReduceIdx != -1) {
+                    candidateSpans[bestReduceIdx] = candidateSpans[bestReduceIdx] - 1
+                    excess--
+                } else {
+                    break
+                }
             }
             
-            rowItems.add(Pair(item, finalSpan))
-            currentCapacity -= finalSpan
-            i++
+            // Alternating pattern placement to distribute visual weight evenly
+            val hasFeatureTile = candidateSpans.any { it >= 2 }
+            if (hasFeatureTile && candidateSpans.size >= 2) {
+                if (alternateLeft) {
+                    rowCandidates.reverse()
+                    candidateSpans.reverse()
+                }
+                alternateLeft = !alternateLeft
+            }
+            
+            for (j in rowCandidates.indices) {
+                rowItems.add(Pair(rowCandidates[j], candidateSpans[j]))
+            }
+        } else {
+            // Leftovers: Keep their ideal spans to prevent aspect ratio distortion
+            rowCandidates.forEach { item ->
+                val aspect = if (item.width > 0 && item.height > 0) item.width.toFloat() / item.height.toFloat() else 1f
+                val idealSpan = when {
+                    item.isFavorite && columns >= 3 -> 2
+                    aspect >= 1.75f && columns >= 3 -> 3
+                    aspect >= 1.2f && columns >= 2 -> 2
+                    else -> 1
+                }.coerceAtMost(columns)
+                rowItems.add(Pair(item, idealSpan))
+            }
         }
         
         specs.add(BentoRowSpec.DenseRow(rowItems))

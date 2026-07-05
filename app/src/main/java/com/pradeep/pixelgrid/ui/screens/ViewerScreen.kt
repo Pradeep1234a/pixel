@@ -69,8 +69,13 @@ import com.pradeep.pixelgrid.ui.components.ShadcnCard
 import java.text.SimpleDateFormat
 import java.util.*
 import kotlin.math.abs
+import kotlin.math.roundToInt
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 
 @OptIn(UnstableApi::class)
 @ExperimentalFoundationApi
@@ -123,19 +128,32 @@ fun ViewerScreen(
         }
     }
 
-    // Auto-center the filmstrip to follow pager swipes
-    LaunchedEffect(pagerState.currentPage) {
-        if (mediaList.isNotEmpty()) {
+    // Continuous filmstrip sync: tracks pager position during mid-swipe for fluid strip movement
+    LaunchedEffect(pagerState, filmstripRowWidthPx) {
+        if (mediaList.isEmpty()) return@LaunchedEffect
+        snapshotFlow {
+            pagerState.currentPage to pagerState.currentPageOffsetFraction
+        }.collect { (page, offsetFraction) ->
+            if (filmstripRowWidthPx <= 0) return@collect
             val halfScreen = filmstripRowWidthPx / 2f
             val itemCenter = thumbBaseSizePx / 2f
-            val centerOffset = (halfScreen - itemCenter).toInt()
+            val baseCenterOffset = (halfScreen - itemCenter).toInt()
 
-            filmstripListState.animateScrollToItem(
-                index = pagerState.currentPage,
-                scrollOffset = -centerOffset
+            // Calculate fractional scroll offset for smooth mid-swipe tracking
+            val itemStride = thumbBaseSizePx + thumbSpacingPx
+            val fractionalPixelShift = (offsetFraction * itemStride).toInt()
+
+            // Scroll to current page with fractional offset applied
+            filmstripListState.scrollToItem(
+                index = page,
+                scrollOffset = -baseCenterOffset + fractionalPixelShift
             )
         }
-        isZoomed = false // Reset zoom state on page change
+    }
+
+    // Reset zoom on page change
+    LaunchedEffect(pagerState.currentPage) {
+        isZoomed = false
     }
 
     // Dynamic system bars configuration to hide/show them in fullscreen mode
@@ -504,6 +522,7 @@ private fun InfoRow(label: String, value: String) {
 }
 
 // Pinch-to-zoom interactive ImageViewer with zoom lock callback
+// Gesture handling is carefully structured to not interfere with HorizontalPager swipe
 @Composable
 private fun ImageViewer(
     uri: Uri,
@@ -516,23 +535,8 @@ private fun ImageViewer(
     var offset by remember { mutableStateOf(Offset.Zero) }
 
     Box(
-        modifier = modifier
-            .fillMaxSize()
-            .pointerInput(Unit) {
-                detectTapGestures(
-                    onTap = { onTap() },
-                    onDoubleTap = {
-                        if (scale > 1f) {
-                            scale = 1f
-                            offset = Offset.Zero
-                            onScaleChanged(false)
-                        } else {
-                            scale = 2.5f
-                            onScaleChanged(true)
-                        }
-                    }
-                )
-            }
+        modifier = modifier.fillMaxSize(),
+        contentAlignment = Alignment.Center
     ) {
         AsyncImage(
             model = uri,
@@ -557,6 +561,21 @@ private fun ImageViewer(
                             onScaleChanged(false)
                         }
                     }
+                }
+                .pointerInput(Unit) {
+                    detectTapGestures(
+                        onTap = { onTap() },
+                        onDoubleTap = {
+                            if (scale > 1f) {
+                                scale = 1f
+                                offset = Offset.Zero
+                                onScaleChanged(false)
+                            } else {
+                                scale = 2.5f
+                                onScaleChanged(true)
+                            }
+                        }
+                    )
                 },
             contentScale = ContentScale.Fit
         )

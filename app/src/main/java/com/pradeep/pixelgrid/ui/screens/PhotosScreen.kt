@@ -26,6 +26,7 @@ import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.ui.graphics.graphicsLayer
@@ -472,7 +473,15 @@ fun PhotosScreen(
     }
 
     Box(modifier = modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
-        Column(modifier = Modifier.fillMaxSize()) {
+        val gridBlurAlpha by animateDpAsState(
+            targetValue = if (previewItem != null) 12.dp else 0.dp,
+            animationSpec = tween(durationMillis = 200)
+        )
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .blur(gridBlurAlpha)
+        ) {
             // Selection mode header
             if (isSelectionMode) {
                 Surface(

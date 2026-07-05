@@ -569,8 +569,8 @@ fun MainApp(
                                     } else {
                                         Row(
                                             modifier = Modifier
-                                                .align(Alignment.BottomStart)
-                                                .padding(bottom = (12f + (4f * scrollFraction)).dp),
+                                                .align(Alignment.TopStart)
+                                                .padding(top = (16f + (32f * (1f - scrollFraction))).dp),
                                             verticalAlignment = Alignment.CenterVertically,
                                             horizontalArrangement = Arrangement.spacedBy(8.dp)
                                         ) {

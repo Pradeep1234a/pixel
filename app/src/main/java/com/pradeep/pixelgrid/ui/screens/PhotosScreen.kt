@@ -201,10 +201,10 @@ fun PhotosScreen(
         }
     }
 
-    // Precompute Staggered Masonry rows
-    val masonryRows = remember(groupedMedia, gridColumns) {
+    // Precompute Staggered Masonry chunks of 30 items
+    val masonryChunks = remember(groupedMedia) {
         groupedMedia.mapValues { (_, items) ->
-            items.chunked(gridColumns)
+            items.chunked(30)
         }
     }
 
@@ -789,42 +789,66 @@ fun PhotosScreen(
                         }
                     }
                     else if (layoutMode == "masonry") {
-                        masonryRows.forEach { (dateHeader, rows) ->
+                        masonryChunks.forEach { (dateHeader, chunks) ->
                             stickyHeader { DateHeader(dateHeader) }
-                            items(rows) { rowItems ->
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                ) {
-                                    rowItems.forEachIndexed { index, item ->
-                                        val ratio = when {
-                                            gridColumns >= 3 && index % 3 == 0 -> 0.75f
-                                            gridColumns >= 3 && index % 3 == 1 -> 1.33f
-                                            else -> 1f
-                                        }
-                                        BentoImageTile(
-                                            item = item,
-                                            modifier = Modifier.weight(1f).aspectRatio(ratio),
-                                            isSelected = selectedItems.any { it.id == item.id },
-                                            isSelectionMode = isSelectionMode,
-                                            onSelectToggle = {
-                                                if (!isSelectionMode) isSelectionMode = true
-                                                toggleSelection(item)
-                                            },
-                                            onClick = {
-                                                if (isSelectionMode) {
-                                                    toggleSelection(item)
-                                                } else {
-                                                    onMediaClick(filteredMediaList, filteredMediaList.indexOf(item))
+                            
+                            chunks.forEach { chunkItems ->
+                                item {
+                                    val colLists = remember(chunkItems, gridColumns) {
+                                        val lists = List(gridColumns) { mutableListOf<MediaItem>() }
+                                        val heights = FloatArray(gridColumns) { 0f }
+                                        for (item in chunkItems) {
+                                            val aspect = if (item.width > 0 && item.height > 0) item.width.toFloat() / item.height.toFloat() else 1f
+                                            val clampedAspect = aspect.coerceIn(0.6f, 1.8f)
+                                            val heightWeight = 1.0f / clampedAspect
+                                            
+                                            var minCol = 0
+                                            var minH = heights[0]
+                                            for (c in 1 until gridColumns) {
+                                                if (heights[c] < minH) {
+                                                    minH = heights[c]
+                                                    minCol = c
                                                 }
-                                            },
-                                            onPreviewTrigger = { previewItem = it }
-                                        )
+                                            }
+                                            lists[minCol].add(item)
+                                            heights[minCol] += heightWeight
+                                        }
+                                        lists
                                     }
-                                    val emptySlots = gridColumns - rowItems.size
-                                    if (emptySlots > 0) {
-                                        repeat(emptySlots) {
-                                            Spacer(modifier = Modifier.weight(1f))
+
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        colLists.forEach { colItems ->
+                                            Column(
+                                                modifier = Modifier.weight(1f),
+                                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                                            ) {
+                                                colItems.forEach { item ->
+                                                    val aspect = if (item.width > 0 && item.height > 0) item.width.toFloat() / item.height.toFloat() else 1f
+                                                    val tileAspect = aspect.coerceIn(0.65f, 1.5f)
+                                                    
+                                                    BentoImageTile(
+                                                        item = item,
+                                                        modifier = Modifier.fillMaxWidth().aspectRatio(tileAspect),
+                                                        isSelected = selectedItems.any { it.id == item.id },
+                                                        isSelectionMode = isSelectionMode,
+                                                        onSelectToggle = {
+                                                            if (!isSelectionMode) isSelectionMode = true
+                                                            toggleSelection(item)
+                                                        },
+                                                        onClick = {
+                                                            if (isSelectionMode) {
+                                                                toggleSelection(item)
+                                                            } else {
+                                                                onMediaClick(filteredMediaList, filteredMediaList.indexOf(item))
+                                                            }
+                                                        },
+                                                        onPreviewTrigger = { previewItem = it }
+                                                    )
+                                                }
+                                            }
                                         }
                                     }
                                 }
@@ -1167,11 +1191,12 @@ private fun BentoImageTile(
     }
 }
 
-// Dynamic Bento Grid Packing Algorithm
+// Dynamic Bento Grid Packing Algorithm with Editorial Spacing Rules
 private fun packItemsIntoBentoRows(items: List<MediaItem>, columns: Int): List<BentoRowSpec> {
     val specs = mutableListOf<BentoRowSpec>()
     var i = 0
     val n = items.size
+    var stepsSinceLarge = 2 // Start with large features allowed
 
     while (i < n) {
         if (columns < 3) {
@@ -1192,35 +1217,42 @@ private fun packItemsIntoBentoRows(items: List<MediaItem>, columns: Int): List<B
 
         // columns >= 3
         val current = items[i]
+        val canPlaceLarge = stepsSinceLarge >= 2
 
         // 1. Panoramic landscape featured photos
-        if (current.isFavorite || (current.width > current.height * 1.5f && !current.isVideo)) {
+        if (canPlaceLarge && (current.isFavorite || (current.width > current.height * 1.5f && !current.isVideo))) {
             specs.add(BentoRowSpec.Panoramic(current))
+            stepsSinceLarge = 0
             i += 1
         }
         // 2. LargeLeft Template
-        else if (i + 2 < n && i % 5 == 0) {
+        else if (canPlaceLarge && i + 2 < n && i % 5 == 0) {
             specs.add(BentoRowSpec.LargeLeft(items[i], items[i + 1], items[i + 2]))
+            stepsSinceLarge = 0
             i += 3
         }
         // 3. LargeRight Template
-        else if (i + 2 < n && i % 5 == 2) {
+        else if (canPlaceLarge && i + 2 < n && i % 5 == 2) {
             specs.add(BentoRowSpec.LargeRight(items[i], items[i + 1], items[i + 2]))
+            stepsSinceLarge = 0
             i += 3
         }
         // 4. ThreeSmall Template
         else if (i + 2 < n) {
             specs.add(BentoRowSpec.ThreeSmall(items[i], items[i + 1], items[i + 2]))
+            stepsSinceLarge++
             i += 3
         }
         // 5. TwoSmall Template
         else if (i + 1 < n) {
             specs.add(BentoRowSpec.TwoSmall(items[i], items[i + 1]))
+            stepsSinceLarge++
             i += 2
         }
         // 6. OneSmall Template
         else {
             specs.add(BentoRowSpec.OneSmall(items[i]))
+            stepsSinceLarge++
             i += 1
         }
     }

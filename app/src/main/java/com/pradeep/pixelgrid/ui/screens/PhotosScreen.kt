@@ -673,7 +673,7 @@ fun PhotosScreen(
                                             spec.items.forEach { item ->
                                                 BentoImageTile(
                                                     item = item,
-                                                    modifier = Modifier.weight(1f).aspectRatio(1f),
+                                                    modifier = Modifier.weight(1f).aspectRatio(1.33f),
                                                     isSelected = selectedItems.any { it.id == item.id },
                                                     isSelectionMode = isSelectionMode,
                                                     onSelectToggle = {
@@ -705,7 +705,7 @@ fun PhotosScreen(
                                         ) {
                                             BentoImageTile(
                                                 item = spec.large,
-                                                modifier = Modifier.weight(2f).aspectRatio(0.96f),
+                                                modifier = Modifier.weight(2f).aspectRatio(1.33f),
                                                 isSelected = selectedItems.any { it.id == spec.large.id },
                                                 isSelectionMode = isSelectionMode,
                                                 onSelectToggle = {
@@ -728,7 +728,7 @@ fun PhotosScreen(
                                                 ) {
                                                     BentoImageTile(
                                                         item = pair.first,
-                                                        modifier = Modifier.fillMaxWidth().aspectRatio(1f),
+                                                        modifier = Modifier.fillMaxWidth().aspectRatio(1.33f),
                                                         isSelected = selectedItems.any { it.id == pair.first.id },
                                                         isSelectionMode = isSelectionMode,
                                                         onSelectToggle = {
@@ -746,7 +746,7 @@ fun PhotosScreen(
                                                     )
                                                     BentoImageTile(
                                                         item = pair.second,
-                                                        modifier = Modifier.fillMaxWidth().aspectRatio(1f),
+                                                        modifier = Modifier.fillMaxWidth().aspectRatio(1.33f),
                                                         isSelected = selectedItems.any { it.id == pair.second.id },
                                                         isSelectionMode = isSelectionMode,
                                                         onSelectToggle = {
@@ -778,7 +778,7 @@ fun PhotosScreen(
                                                 ) {
                                                     BentoImageTile(
                                                         item = pair.first,
-                                                        modifier = Modifier.fillMaxWidth().aspectRatio(1f),
+                                                        modifier = Modifier.fillMaxWidth().aspectRatio(1.33f),
                                                         isSelected = selectedItems.any { it.id == pair.first.id },
                                                         isSelectionMode = isSelectionMode,
                                                         onSelectToggle = {
@@ -796,7 +796,7 @@ fun PhotosScreen(
                                                     )
                                                     BentoImageTile(
                                                         item = pair.second,
-                                                        modifier = Modifier.fillMaxWidth().aspectRatio(1f),
+                                                        modifier = Modifier.fillMaxWidth().aspectRatio(1.33f),
                                                         isSelected = selectedItems.any { it.id == pair.second.id },
                                                         isSelectionMode = isSelectionMode,
                                                         onSelectToggle = {
@@ -816,7 +816,7 @@ fun PhotosScreen(
                                             }
                                             BentoImageTile(
                                                 item = spec.large,
-                                                modifier = Modifier.weight(2f).aspectRatio(0.96f),
+                                                modifier = Modifier.weight(2f).aspectRatio(1.33f),
                                                 isSelected = selectedItems.any { it.id == spec.large.id },
                                                 isSelectionMode = isSelectionMode,
                                                 onSelectToggle = {

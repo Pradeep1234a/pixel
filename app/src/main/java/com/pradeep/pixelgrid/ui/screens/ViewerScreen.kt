@@ -1,6 +1,5 @@
 package com.pradeep.pixelgrid.ui.screens
 
-import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.view.ViewGroup
@@ -8,13 +7,14 @@ import android.widget.FrameLayout
 import androidx.annotation.OptIn
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.Spring
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -45,12 +45,14 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -62,11 +64,12 @@ import androidx.media3.ui.PlayerView
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import coil.request.videoFrameMillis
-import androidx.compose.ui.platform.LocalContext
 import com.pradeep.pixelgrid.data.MediaItem
 import com.pradeep.pixelgrid.ui.components.ShadcnCard
 import java.text.SimpleDateFormat
 import java.util.*
+import kotlin.math.abs
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 @OptIn(UnstableApi::class)
@@ -94,20 +97,40 @@ fun ViewerScreen(
     // Find the currently active item
     val activeItem = mediaList.getOrNull(pagerState.currentPage) ?: return
 
-    // Lazy list state for the bottom thumbnail strip
-    val lazyListState = rememberLazyListState()
+    // Filmstrip state
+    val filmstripListState = rememberLazyListState()
+    var filmstripIsSettled by remember { mutableStateOf(true) }
+    var filmstripRowWidthPx by remember { mutableIntStateOf(0) }
 
     val configuration = LocalConfiguration.current
     val density = LocalDensity.current
 
-    // Auto-scroll the thumbnail strip to follow pager swipes and center the active item
+    // Filmstrip thumbnail dimensions
+    val thumbBaseSizeDp = 40.dp
+    val thumbSpacingDp = 4.dp
+    val thumbBaseSizePx = with(density) { thumbBaseSizeDp.toPx() }
+    val thumbSpacingPx = with(density) { thumbSpacingDp.toPx() }
+
+    // Track scrolling state to implement delayed selection highlight
+    LaunchedEffect(pagerState.isScrollInProgress, filmstripListState.isScrollInProgress) {
+        val isMoving = pagerState.isScrollInProgress || filmstripListState.isScrollInProgress
+        if (isMoving) {
+            filmstripIsSettled = false
+        } else {
+            // Small delay to let the strip fully settle before showing highlight
+            delay(200)
+            filmstripIsSettled = true
+        }
+    }
+
+    // Auto-center the filmstrip to follow pager swipes
     LaunchedEffect(pagerState.currentPage) {
         if (mediaList.isNotEmpty()) {
-            val screenWidthPx = with(density) { configuration.screenWidthDp.dp.toPx() }
-            val itemWidthPx = with(density) { 40.dp.toPx() }
-            val centerOffset = ((screenWidthPx - itemWidthPx) / 2).toInt()
-            
-            lazyListState.animateScrollToItem(
+            val halfScreen = filmstripRowWidthPx / 2f
+            val itemCenter = thumbBaseSizePx / 2f
+            val centerOffset = (halfScreen - itemCenter).toInt()
+
+            filmstripListState.animateScrollToItem(
                 index = pagerState.currentPage,
                 scrollOffset = -centerOffset
             )
@@ -254,7 +277,7 @@ fun ViewerScreen(
             }
         }
 
-        // --- BOTTOM PANEL OVERLAY (Carousel Strip + Action Bar) ---
+        // --- BOTTOM PANEL OVERLAY (Filmstrip + Action Bar) ---
         AnimatedVisibility(
             visible = showUi && !showInfoDrawer,
             enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
@@ -267,53 +290,107 @@ fun ViewerScreen(
                 modifier = Modifier
                     .fillMaxWidth()
                     .background(footerColor)
-                    .padding(vertical = 12.dp),
+                    .padding(vertical = 8.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(12.dp)
+                verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                // 1. Horizontal Previews Strip
-                LazyRow(
-                    state = lazyListState,
+                // 1. Premium Filmstrip with distance-based scaling
+                Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(48.dp),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    contentPadding = PaddingValues(horizontal = 16.dp)
+                        .height(58.dp),
+                    contentAlignment = Alignment.Center
                 ) {
-                    itemsIndexed(mediaList) { index, item ->
-                        val isSelected = pagerState.currentPage == index
-                        Box(
-                            modifier = Modifier
-                                .size(40.dp)
-                                .clip(RoundedCornerShape(6.dp))
-                                .border(
-                                    width = if (isSelected) 2.dp else 0.dp,
-                                    color = if (isSelected) footerContentColor else Color.Transparent,
-                                    shape = RoundedCornerShape(6.dp)
-                                )
-                                .clickable {
-                                    coroutineScope.launch {
-                                        pagerState.animateScrollToPage(index)
+                    // Calculate content padding to center the first and last items
+                    val halfScreenDp = with(density) { (filmstripRowWidthPx / 2f).toDp() }
+                    val halfThumbDp = thumbBaseSizeDp / 2
+                    val edgePadding = (halfScreenDp - halfThumbDp).coerceAtLeast(0.dp)
+
+                    LazyRow(
+                        state = filmstripListState,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(58.dp)
+                            .onGloballyPositioned { coords ->
+                                filmstripRowWidthPx = coords.size.width
+                            },
+                        horizontalArrangement = Arrangement.spacedBy(thumbSpacingDp),
+                        contentPadding = PaddingValues(horizontal = edgePadding),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        itemsIndexed(mediaList) { index, item ->
+                            // Calculate this item's visual center position relative to the LazyRow viewport center
+                            val itemInfo = filmstripListState.layoutInfo.visibleItemsInfo.firstOrNull { it.index == index }
+                            val viewportCenter = filmstripRowWidthPx / 2f
+                            val distanceFromCenter = if (itemInfo != null) {
+                                val itemCenter = itemInfo.offset + itemInfo.size / 2f
+                                abs(itemCenter - viewportCenter)
+                            } else {
+                                // Off-screen: use maximum distance
+                                viewportCenter
+                            }
+
+                            // Normalize distance: 0 = center, 1 = far from center
+                            val maxInfluenceDistance = thumbBaseSizePx * 3f
+                            val normalizedDistance = (distanceFromCenter / maxInfluenceDistance).coerceIn(0f, 1f)
+
+                            // Scale: center = 1.35x, edges = 1.0x (compact)
+                            val isSelected = pagerState.currentPage == index && filmstripIsSettled
+                            val targetScale = if (isSelected) 1.35f else {
+                                1f + 0.35f * (1f - normalizedDistance)
+                            }
+                            val animatedScale by animateFloatAsState(
+                                targetValue = if (filmstripIsSettled && isSelected) 1.35f else targetScale,
+                                animationSpec = if (filmstripIsSettled) spring(stiffness = Spring.StiffnessLow) else tween(0)
+                            )
+
+                            // Border highlight: only when settled
+                            val borderAlpha by animateFloatAsState(
+                                targetValue = if (isSelected) 1f else 0f,
+                                animationSpec = tween(durationMillis = 250)
+                            )
+
+                            Box(
+                                modifier = Modifier
+                                    .size(thumbBaseSizeDp)
+                                    .graphicsLayer {
+                                        scaleX = animatedScale
+                                        scaleY = animatedScale
+                                    }
+                                    .clip(RoundedCornerShape(5.dp))
+                                    .then(
+                                        if (borderAlpha > 0.01f) {
+                                            Modifier.border(
+                                                width = 2.dp,
+                                                color = footerContentColor.copy(alpha = borderAlpha),
+                                                shape = RoundedCornerShape(5.dp)
+                                            )
+                                        } else Modifier
+                                    )
+                                    .clickable {
+                                        coroutineScope.launch {
+                                            pagerState.animateScrollToPage(index)
+                                        }
+                                    }
+                            ) {
+                                val thumbContext = LocalContext.current
+                                val imageModel = remember(item) {
+                                    if (item.isVideo) {
+                                        ImageRequest.Builder(thumbContext)
+                                            .data(item.uri)
+                                            .videoFrameMillis(1000)
+                                            .build()
+                                    } else {
+                                        item.uri as Any
                                     }
                                 }
-                        ) {
-                            val context = LocalContext.current
-                            val imageModel = remember(item) {
-                                if (item.isVideo) {
-                                    ImageRequest.Builder(context)
-                                        .data(item.uri)
-                                        .videoFrameMillis(1000)
-                                        .build()
-                                } else {
-                                    item.uri as Any
-                                }
+                                AsyncImage(
+                                    model = imageModel,
+                                    contentDescription = item.name,
+                                    modifier = Modifier.fillMaxSize(),
+                                    contentScale = ContentScale.Crop
+                                )
                             }
-                            AsyncImage(
-                                model = imageModel,
-                                contentDescription = item.name,
-                                modifier = Modifier.fillMaxSize(),
-                                contentScale = ContentScale.Crop
-                            )
                         }
                     }
                 }

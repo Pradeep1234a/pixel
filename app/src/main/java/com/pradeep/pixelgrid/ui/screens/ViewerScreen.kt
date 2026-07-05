@@ -107,83 +107,6 @@ fun ViewerScreen(
     // Find the currently active item
     val activeItem = mediaList.getOrNull(pagerState.currentPage) ?: return
 
-    // Filmstrip state
-    val filmstripListState = rememberLazyListState()
-    var filmstripIsSettled by remember { mutableStateOf(true) }
-    var filmstripRowWidthPx by remember { mutableIntStateOf(0) }
-
-    val configuration = LocalConfiguration.current
-    val density = LocalDensity.current
-
-    // Filmstrip thumbnail dimensions
-    val thumbBaseSizeDp = 40.dp
-    val thumbSpacingDp = 4.dp
-    val thumbBaseSizePx = with(density) { thumbBaseSizeDp.toPx() }
-    val thumbSpacingPx = with(density) { thumbSpacingDp.toPx() }
-
-    // Real-time calculation of active focus index for floating preview and delayed selection
-    val floatIndex = pagerState.currentPage + pagerState.currentPageOffsetFraction
-    val centeredItemIndex = floatIndex.roundToInt().coerceIn(0, mediaList.lastIndex)
-    val centeredItem = mediaList.getOrNull(centeredItemIndex)
-
-    // Sync filmstrip drag/scrolling to pager in real-time
-    val filmstripCenteredIndex by remember {
-        derivedStateOf {
-            val visibleItems = filmstripListState.layoutInfo.visibleItemsInfo
-            if (visibleItems.isNotEmpty() && filmstripRowWidthPx > 0) {
-                val viewportCenter = filmstripRowWidthPx / 2f
-                val closestItem = visibleItems.minByOrNull {
-                    val itemCenter = it.offset + it.size / 2f
-                    abs(itemCenter - viewportCenter)
-                }
-                closestItem?.index ?: pagerState.currentPage
-            } else {
-                pagerState.currentPage
-            }
-        }
-    }
-
-    LaunchedEffect(filmstripCenteredIndex) {
-        if (filmstripListState.isScrollInProgress && filmstripCenteredIndex != -1 && filmstripCenteredIndex != pagerState.currentPage) {
-            pagerState.scrollToPage(filmstripCenteredIndex)
-        }
-    }
-
-    // Track scrolling state to implement delayed selection highlight
-    LaunchedEffect(pagerState.isScrollInProgress, filmstripListState.isScrollInProgress) {
-        val isMoving = pagerState.isScrollInProgress || filmstripListState.isScrollInProgress
-        if (isMoving) {
-            filmstripIsSettled = false
-        } else {
-            // Small delay to let the strip fully settle before showing highlight
-            delay(200)
-            filmstripIsSettled = true
-        }
-    }
-
-    // Continuous filmstrip sync: tracks pager position during mid-swipe for fluid strip movement
-    LaunchedEffect(pagerState, filmstripRowWidthPx) {
-        if (mediaList.isEmpty()) return@LaunchedEffect
-        snapshotFlow {
-            pagerState.currentPage to pagerState.currentPageOffsetFraction
-        }.collect { (page, offsetFraction) ->
-            if (filmstripRowWidthPx <= 0) return@collect
-            val halfScreen = filmstripRowWidthPx / 2f
-            val itemCenter = thumbBaseSizePx / 2f
-            val baseCenterOffset = (halfScreen - itemCenter).toInt()
-
-            // Calculate fractional scroll offset for smooth mid-swipe tracking
-            val itemStride = thumbBaseSizePx + thumbSpacingPx
-            val fractionalPixelShift = (offsetFraction * itemStride).toInt()
-
-            // Scroll to current page with fractional offset applied
-            filmstripListState.scrollToItem(
-                index = page,
-                scrollOffset = -baseCenterOffset + fractionalPixelShift
-            )
-        }
-    }
-
     // Reset zoom on page change
     LaunchedEffect(pagerState.currentPage) {
         isZoomed = false
@@ -360,7 +283,7 @@ fun ViewerScreen(
             }
         }
 
-        // --- BOTTOM PANEL OVERLAY (Filmstrip + Action Bar) ---
+        // --- BOTTOM PANEL OVERLAY (Action Bar & Lens Chip) ---
         AnimatedVisibility(
             visible = showUi && !showInfoDrawer,
             enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
@@ -377,75 +300,7 @@ fun ViewerScreen(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                // 1. Floating Preview above the filmstrip, perfectly synchronized with swiping/dragging
-                if (centeredItem != null) {
-                    Surface(
-                        shape = RoundedCornerShape(12.dp),
-                        color = Color.Black.copy(alpha = 0.75f),
-                        modifier = Modifier
-                            .padding(bottom = 4.dp)
-                            .wrapContentWidth()
-                            .height(52.dp)
-                            .border(1.dp, Color.White.copy(alpha = 0.15f), RoundedCornerShape(12.dp))
-                    ) {
-                        Row(
-                            modifier = Modifier
-                                .padding(horizontal = 8.dp, vertical = 6.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            // Sliding mini preview matching main image
-                            HorizontalPager(
-                                state = pagerState,
-                                modifier = Modifier
-                                    .size(40.dp)
-                                    .clip(RoundedCornerShape(6.dp)),
-                                userScrollEnabled = false
-                            ) { page ->
-                                val item = mediaList.getOrNull(page)
-                                if (item != null) {
-                                    val context = LocalContext.current
-                                    val previewModel = remember(item) {
-                                        if (item.isVideo) {
-                                            ImageRequest.Builder(context)
-                                                .data(item.uri)
-                                                .videoFrameMillis(1000)
-                                                .build()
-                                        } else {
-                                            item.uri as Any
-                                        }
-                                    }
-                                    AsyncImage(
-                                        model = previewModel,
-                                        contentDescription = null,
-                                        modifier = Modifier.fillMaxSize(),
-                                        contentScale = ContentScale.Crop
-                                    )
-                                }
-                            }
-
-                            // Center focused details text
-                            Column(
-                                modifier = Modifier.padding(end = 4.dp),
-                                verticalArrangement = Arrangement.Center
-                            ) {
-                                Text(
-                                    text = formatHeaderDate(centeredItem.dateAdded),
-                                    style = MaterialTheme.typography.labelLarge.copy(fontSize = 12.sp),
-                                    fontWeight = FontWeight.Bold,
-                                    color = Color.White
-                                )
-                                Text(
-                                    text = formatHeaderTime(centeredItem.dateAdded),
-                                    style = MaterialTheme.typography.bodySmall.copy(fontSize = 10.sp),
-                                    color = Color.White.copy(alpha = 0.6f)
-                                )
-                            }
-                        }
-                    }
-                }
-
-                // 2. Google Lens Pill Chip (floats on the right side above filmstrip)
+                // 1. Google Lens Pill Chip (floats on the right side above action bar)
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -480,113 +335,7 @@ fun ViewerScreen(
                     }
                 }
 
-                // 3. Premium Filmstrip with distance-based scaling (taller rounded rects)
-                val thumbWidthDp = 32.dp
-                val thumbHeightDp = 46.dp
-                val thumbWidthPx = with(density) { thumbWidthDp.toPx() }
-
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(58.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    // Calculate content padding to center the first and last items
-                    val halfScreenDp = with(density) { (filmstripRowWidthPx / 2f).toDp() }
-                    val halfThumbDp = thumbWidthDp / 2
-                    val edgePadding = (halfScreenDp - halfThumbDp).coerceAtLeast(0.dp)
-
-                    LazyRow(
-                        state = filmstripListState,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(58.dp)
-                            .onGloballyPositioned { coords ->
-                                filmstripRowWidthPx = coords.size.width
-                            },
-                        horizontalArrangement = Arrangement.spacedBy(thumbSpacingDp),
-                        contentPadding = PaddingValues(horizontal = edgePadding),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        itemsIndexed(mediaList) { index, item ->
-                            // Calculate this item's visual center position relative to the LazyRow viewport center
-                            val itemInfo = filmstripListState.layoutInfo.visibleItemsInfo.firstOrNull { it.index == index }
-                            val viewportCenter = filmstripRowWidthPx / 2f
-                            val distanceFromCenter = if (itemInfo != null) {
-                                val itemCenter = itemInfo.offset + itemInfo.size / 2f
-                                abs(itemCenter - viewportCenter)
-                            } else {
-                                // Off-screen: use maximum distance
-                                viewportCenter
-                            }
-
-                            // Normalize distance: 0 = center, 1 = far from center
-                            val maxInfluenceDistance = thumbWidthPx * 3f
-                            val normalizedDistance = (distanceFromCenter / maxInfluenceDistance).coerceIn(0f, 1f)
-
-                            // Scale: center = 1.35x, edges = 1.0x (compact)
-                            val isSelected = pagerState.currentPage == index && filmstripIsSettled
-                            val targetScale = if (isSelected) 1.35f else {
-                                1f + 0.35f * (1f - normalizedDistance)
-                            }
-                            val animatedScale by animateFloatAsState(
-                                targetValue = if (filmstripIsSettled && isSelected) 1.35f else targetScale,
-                                animationSpec = if (filmstripIsSettled) spring(stiffness = Spring.StiffnessLow) else tween(0)
-                            )
-
-                            // Border highlight: only when settled
-                            val borderAlpha by animateFloatAsState(
-                                targetValue = if (isSelected) 1f else 0f,
-                                animationSpec = tween(durationMillis = 250)
-                            )
-
-                            Box(
-                                modifier = Modifier
-                                    .width(thumbWidthDp)
-                                    .height(thumbHeightDp)
-                                    .graphicsLayer {
-                                        scaleX = animatedScale
-                                        scaleY = animatedScale
-                                    }
-                                    .clip(RoundedCornerShape(4.dp))
-                                    .then(
-                                        if (borderAlpha > 0.01f) {
-                                            Modifier.border(
-                                                width = 2.dp,
-                                                color = Color.White.copy(alpha = borderAlpha),
-                                                shape = RoundedCornerShape(4.dp)
-                                            )
-                                        } else Modifier
-                                    )
-                                    .clickable {
-                                        coroutineScope.launch {
-                                            pagerState.animateScrollToPage(index)
-                                        }
-                                    }
-                            ) {
-                                val thumbContext = LocalContext.current
-                                val imageModel = remember(item) {
-                                    if (item.isVideo) {
-                                        ImageRequest.Builder(thumbContext)
-                                            .data(item.uri)
-                                            .videoFrameMillis(1000)
-                                            .build()
-                                    } else {
-                                        item.uri as Any
-                                    }
-                                }
-                                AsyncImage(
-                                    model = imageModel,
-                                    contentDescription = item.name,
-                                    modifier = Modifier.fillMaxSize(),
-                                    contentScale = ContentScale.Crop
-                                )
-                            }
-                        }
-                    }
-                }
-
-                // 4. Control Action Buttons Row (Share, Pill Action Bar, Info) matching system gallery
+                // 2. Control Action Buttons Row (Share, Pill Action Bar, Info) matching system gallery
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()

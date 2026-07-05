@@ -109,6 +109,7 @@ fun ViewerScreen(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
+    val density = LocalDensity.current
     val coroutineScope = rememberCoroutineScope()
     var showUi by remember { mutableStateOf(true) }
     var showInfoDrawer by remember { mutableStateOf(false) }
@@ -120,6 +121,18 @@ fun ViewerScreen(
     var exitOffsetY by remember { mutableStateOf(0f) }
     var exitScale by remember { mutableStateOf(1f) }
     var exitAlpha by remember { mutableStateOf(1f) }
+
+    // Grid-to-detail shared-element expansion progress
+    val enterProgress = remember { Animatable(0f) }
+    LaunchedEffect(Unit) {
+        enterProgress.animateTo(
+            targetValue = 1f,
+            animationSpec = spring(
+                stiffness = Spring.StiffnessMediumLow,
+                dampingRatio = Spring.DampingRatioLowBouncy
+            )
+        )
+    }
 
     LaunchedEffect(isExiting) {
         if (isExiting) {
@@ -345,16 +358,17 @@ fun ViewerScreen(
                             
                             translationY = verticalOffsetY + exitOffsetY
                             
-                            // 1. Combine drag-to-dismiss scale, exit transition scale, and horizontal pager swipe scale
+                            // 1. Combine drag-to-dismiss scale, exit transition scale, horizontal pager swipe scale, and enter progress scale
                             val dragScale = (1f - (abs(verticalOffsetY) / 3000f)).coerceIn(0.85f, 1f)
                             val pagerScale = 1f - (abs(pageOffset) * 0.12f).coerceIn(0f, 0.12f) // smooth scale down as page moves away
-                            val finalScale = dragScale * exitScale * pagerScale
+                            val enterScale = 0.65f + (0.35f * enterProgress.value) // expand from center coordinates
+                            val finalScale = dragScale * exitScale * pagerScale * enterScale
                             scaleX = finalScale
                             scaleY = finalScale
                             
-                            // 2. Combine swipe-down drag opacity, exit animation fade, and horizontal swipe page fade
+                            // 2. Combine swipe-down drag opacity, exit animation fade, horizontal swipe page fade, and enter fade
                             val pagerAlpha = 1f - (abs(pageOffset) * 0.45f).coerceIn(0f, 0.45f) // smooth fade out as page moves away
-                            alpha = exitAlpha * (1f - dragDismissFraction) * pagerAlpha
+                            alpha = exitAlpha * (1f - dragDismissFraction) * pagerAlpha * enterProgress.value
                         }
                 ) {
                     if (pageItem.isVideo) {
@@ -437,8 +451,84 @@ fun ViewerScreen(
                     .background(footerColor)
                     .padding(vertical = 8.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(8.dp)
+                verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
+                // --- Premium Bottom Filmstrip ---
+                val itemWidthDp = 50.dp
+                val spacingDp = 6.dp
+                val itemWidthPx = with(density) { (itemWidthDp + spacingDp).toPx() }
+                val halfItemWidthPx = with(density) { (itemWidthDp / 2).toPx() }
+                val configuration = LocalConfiguration.current
+                val screenWidthPx = with(density) { configuration.screenWidthDp.dp.toPx() }
+                
+                // Continuous scroll offset of the filmstrip centered on the active item
+                val currentScrollPos = pagerState.currentPage + pagerState.currentPageOffsetFraction
+                
+                // Local window optimization to render 21 items around current index for butter-smooth rendering
+                val startIndex = (pagerState.currentPage - 10).coerceAtLeast(0)
+                val windowedList = mediaList.drop(startIndex).take(21)
+                
+                val filmstripTranslationX = (screenWidthPx / 2f) - halfItemWidthPx - (currentScrollPos * itemWidthPx) + (startIndex * itemWidthPx)
+
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(60.dp),
+                    contentAlignment = Alignment.CenterStart
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .graphicsLayer { translationX = filmstripTranslationX }
+                            .fillMaxHeight(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        windowedList.forEachIndexed { relativeIndex, item ->
+                            val index = startIndex + relativeIndex
+                            val isSelected = index == pagerState.currentPage && !pagerState.isScrollInProgress
+                            
+                            val thumbScale by animateFloatAsState(
+                                targetValue = if (isSelected) 1.25f else 1.0f,
+                                animationSpec = spring(stiffness = Spring.StiffnessMediumLow)
+                            )
+                            val borderAlpha by animateFloatAsState(
+                                targetValue = if (isSelected) 1.0f else 0f,
+                                animationSpec = tween(200)
+                            )
+
+                            Box(
+                                modifier = Modifier
+                                    .padding(horizontal = 3.dp) // 6.dp spacing total
+                                    .size(itemWidthDp)
+                                    .graphicsLayer {
+                                        scaleX = thumbScale
+                                        scaleY = thumbScale
+                                    }
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .border(
+                                        width = 2.dp,
+                                        color = Color.White.copy(alpha = borderAlpha),
+                                        shape = RoundedCornerShape(8.dp)
+                                    )
+                                    .clickable {
+                                        coroutineScope.launch {
+                                            pagerState.animateScrollToPage(index)
+                                        }
+                                    }
+                            ) {
+                                AsyncImage(
+                                    model = ImageRequest.Builder(context)
+                                        .data(item.uri)
+                                        .videoFrameMillis(1000)
+                                        .crossfade(true)
+                                        .build(),
+                                    contentDescription = "Filmstrip Thumbnail",
+                                    contentScale = ContentScale.Crop,
+                                    modifier = Modifier.fillMaxSize()
+                                )
+                            }
+                        }
+                    }
+                }
                 // 1. Google Lens Pill Chip (floats on the right side above action bar)
                 Box(
                     modifier = Modifier
@@ -548,7 +638,6 @@ fun ViewerScreen(
         }
 
         // --- GOOGLE PHOTOS STYLE DETAILS SHEET ---
-        val density = LocalDensity.current
         val sheetHeight = 460.dp
         val targetSheetOffsetY = if (showInfoDrawer) 0f else with(density) { sheetHeight.toPx() }
         var dragSheetOffset by remember { mutableStateOf(0f) }

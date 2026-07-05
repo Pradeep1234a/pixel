@@ -28,6 +28,11 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.ui.graphics.PathFillType
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.graphics.vector.path
+import android.widget.Toast
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Delete
@@ -226,6 +231,38 @@ fun ViewerScreen(
         context.startActivity(Intent.createChooser(intent, "Share Media"))
     }
 
+    // Media edit intent invoking standard photo editor
+    val editMedia = {
+        try {
+            val intent = Intent(Intent.ACTION_EDIT).apply {
+                setDataAndType(activeItem.uri, activeItem.mimeType)
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+            }
+            context.startActivity(Intent.createChooser(intent, "Edit Media"))
+        } catch (e: Exception) {
+            Toast.makeText(context, "No editor available for this file type", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    // Google Lens trigger intent with fallback browser view
+    val launchGoogleLens = {
+        try {
+            val intent = Intent("com.google.android.gms.lens.LAUNCH_FROM_API").apply {
+                setDataAndType(activeItem.uri, activeItem.mimeType)
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                putExtra("lens_launch_status_panel", true)
+            }
+            context.startActivity(intent)
+        } catch (e: Exception) {
+            try {
+                val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://lens.google.com/uploadbyurl?url=${activeItem.uri}"))
+                context.startActivity(intent)
+            } catch (ex: Exception) {
+                Toast.makeText(context, "Google Lens is not installed", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
     // Dynamic animated background color fading between dark zinc (UI showing) and black fullscreen
     val targetBgColor = if (showUi) {
         Color(0xFF09090B) // Dark Zinc for contrast focus
@@ -234,11 +271,11 @@ fun ViewerScreen(
     }
     val animatedBgColor by animateColorAsState(targetBgColor, animationSpec = tween(300))
 
-    // Theme content colors
-    val headerColor = if (darkTheme) Color.Black.copy(alpha = 0.8f) else MaterialTheme.colorScheme.surface
-    val headerContentColor = if (darkTheme) Color.White else MaterialTheme.colorScheme.onSurface
-    val footerColor = if (darkTheme) Color.Black.copy(alpha = 0.8f) else MaterialTheme.colorScheme.surface
-    val footerContentColor = if (darkTheme) Color.White else MaterialTheme.colorScheme.onSurface
+    // Theme content colors: overlays are transparent to let photo show edge-to-edge behind them
+    val headerColor = Color.Transparent
+    val headerContentColor = Color.White
+    val footerColor = Color.Transparent
+    val footerContentColor = Color.White
 
     Box(
         modifier = modifier
@@ -408,7 +445,46 @@ fun ViewerScreen(
                     }
                 }
 
-                // 2. Premium Filmstrip with distance-based scaling
+                // 2. Google Lens Pill Chip (floats on the right side above filmstrip)
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp),
+                    contentAlignment = Alignment.CenterEnd
+                ) {
+                    Surface(
+                        shape = RoundedCornerShape(18.dp),
+                        color = Color.Black.copy(alpha = 0.5f),
+                        modifier = Modifier
+                            .clickable { launchGoogleLens() }
+                            .border(1.dp, Color.White.copy(alpha = 0.15f), RoundedCornerShape(18.dp))
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Icon(
+                                imageVector = LensIcon,
+                                contentDescription = "Google Lens",
+                                tint = Color.White,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Text(
+                                text = "Google Lens",
+                                style = MaterialTheme.typography.labelMedium.copy(fontSize = 11.sp),
+                                color = Color.White,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+                    }
+                }
+
+                // 3. Premium Filmstrip with distance-based scaling (taller rounded rects)
+                val thumbWidthDp = 32.dp
+                val thumbHeightDp = 46.dp
+                val thumbWidthPx = with(density) { thumbWidthDp.toPx() }
+
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -417,7 +493,7 @@ fun ViewerScreen(
                 ) {
                     // Calculate content padding to center the first and last items
                     val halfScreenDp = with(density) { (filmstripRowWidthPx / 2f).toDp() }
-                    val halfThumbDp = thumbBaseSizeDp / 2
+                    val halfThumbDp = thumbWidthDp / 2
                     val edgePadding = (halfScreenDp - halfThumbDp).coerceAtLeast(0.dp)
 
                     LazyRow(
@@ -445,7 +521,7 @@ fun ViewerScreen(
                             }
 
                             // Normalize distance: 0 = center, 1 = far from center
-                            val maxInfluenceDistance = thumbBaseSizePx * 3f
+                            val maxInfluenceDistance = thumbWidthPx * 3f
                             val normalizedDistance = (distanceFromCenter / maxInfluenceDistance).coerceIn(0f, 1f)
 
                             // Scale: center = 1.35x, edges = 1.0x (compact)
@@ -466,18 +542,19 @@ fun ViewerScreen(
 
                             Box(
                                 modifier = Modifier
-                                    .size(thumbBaseSizeDp)
+                                    .width(thumbWidthDp)
+                                    .height(thumbHeightDp)
                                     .graphicsLayer {
                                         scaleX = animatedScale
                                         scaleY = animatedScale
                                     }
-                                    .clip(RoundedCornerShape(5.dp))
+                                    .clip(RoundedCornerShape(4.dp))
                                     .then(
                                         if (borderAlpha > 0.01f) {
                                             Modifier.border(
                                                 width = 2.dp,
-                                                color = footerContentColor.copy(alpha = borderAlpha),
-                                                shape = RoundedCornerShape(5.dp)
+                                                color = Color.White.copy(alpha = borderAlpha),
+                                                shape = RoundedCornerShape(4.dp)
                                             )
                                         } else Modifier
                                     )
@@ -509,29 +586,74 @@ fun ViewerScreen(
                     }
                 }
 
-                // 2. Control Action Buttons Row (Share, Favorite, Delete, Info)
+                // 4. Control Action Buttons Row (Share, Pill Action Bar, Info) matching system gallery
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 24.dp),
-                    horizontalArrangement = Arrangement.SpaceAround,
+                        .padding(horizontal = 24.dp, vertical = 8.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    IconButton(onClick = shareMedia) {
-                        Icon(Icons.Default.Share, contentDescription = "Share", tint = footerContentColor)
+                    // Share Button (circular translucent)
+                    IconButton(
+                        onClick = shareMedia,
+                        modifier = Modifier
+                            .size(46.dp)
+                            .background(Color.Black.copy(alpha = 0.5f), CircleShape)
+                            .border(1.dp, Color.White.copy(alpha = 0.12f), CircleShape)
+                    ) {
+                        Icon(Icons.Default.Share, contentDescription = "Share", tint = Color.White, modifier = Modifier.size(20.dp))
                     }
-                    IconButton(onClick = { onFavoriteToggle(activeItem) }) {
-                        Icon(
-                            imageVector = if (activeItem.isFavorite) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
-                            contentDescription = "Favorite",
-                            tint = if (activeItem.isFavorite) Color.Red else footerContentColor
-                        )
+
+                    // Middle Pill Action Bar (translucent pill containing Favorite, Edit, Delete)
+                    Surface(
+                        shape = RoundedCornerShape(24.dp),
+                        color = Color.Black.copy(alpha = 0.5f),
+                        modifier = Modifier
+                            .height(46.dp)
+                            .border(1.dp, Color.White.copy(alpha = 0.12f), RoundedCornerShape(24.dp))
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            IconButton(onClick = { onFavoriteToggle(activeItem) }) {
+                                Icon(
+                                    imageVector = if (activeItem.isFavorite) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
+                                    contentDescription = "Favorite",
+                                    tint = if (activeItem.isFavorite) Color.Red else Color.White,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+                            IconButton(onClick = editMedia) {
+                                Icon(
+                                    imageVector = EditIcon,
+                                    contentDescription = "Edit",
+                                    tint = Color.White,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+                            IconButton(onClick = { onDeleteMedia(activeItem) }) {
+                                Icon(
+                                    Icons.Default.Delete,
+                                    contentDescription = "Delete",
+                                    tint = Color.White,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+                        }
                     }
-                    IconButton(onClick = { onDeleteMedia(activeItem) }) {
-                        Icon(Icons.Default.Delete, contentDescription = "Delete", tint = footerContentColor)
-                    }
-                    IconButton(onClick = { showInfoDrawer = true }) {
-                        Icon(Icons.Default.Info, contentDescription = "Info", tint = footerContentColor)
+
+                    // Info Button (circular translucent)
+                    IconButton(
+                        onClick = { showInfoDrawer = true },
+                        modifier = Modifier
+                            .size(46.dp)
+                            .background(Color.Black.copy(alpha = 0.5f), CircleShape)
+                            .border(1.dp, Color.White.copy(alpha = 0.12f), CircleShape)
+                    ) {
+                        Icon(Icons.Default.Info, contentDescription = "Info", tint = Color.White, modifier = Modifier.size(20.dp))
                     }
                 }
             }
@@ -763,3 +885,97 @@ private fun formatFullDate(timestampSeconds: Long): String {
     val date = Date(timestampSeconds * 1000)
     return SimpleDateFormat("MMMM d, yyyy 'at' h:mm a", Locale.getDefault()).format(date)
 }
+
+// Custom vector icon representing Pencil / Edit
+private val EditIcon: ImageVector
+    get() = ImageVector.Builder(
+        name = "Edit",
+        defaultWidth = 24.dp,
+        defaultHeight = 24.dp,
+        viewportWidth = 24f,
+        viewportHeight = 24f
+    ).apply {
+        path(
+            fill = null,
+            stroke = androidx.compose.ui.graphics.SolidColor(Color.White),
+            strokeLineWidth = 2f,
+            pathFillType = PathFillType.NonZero
+        ) {
+            moveTo(3f, 17.25f)
+            verticalLineTo(21f)
+            horizontalLineTo(6.75f)
+            lineTo(17.81f, 9.94f)
+            lineTo(14.06f, 6.19f)
+            lineTo(3f, 17.25f)
+            close()
+            moveTo(20.71f, 7.04f)
+            curveTo(21.1f, 6.65f, 21.1f, 6.02f, 20.71f, 5.63f)
+            lineTo(18.37f, 3.29f)
+            curveTo(17.98f, 2.9f, 17.35f, 2.9f, 16.96f, 3.29f)
+            lineTo(15.13f, 5.12f)
+            lineTo(18.88f, 8.87f)
+            lineTo(20.71f, 7.04f)
+            close()
+        }
+    }.build()
+
+// Custom vector icon representing Google Lens frame
+private val LensIcon: ImageVector
+    get() = ImageVector.Builder(
+        name = "Lens",
+        defaultWidth = 24.dp,
+        defaultHeight = 24.dp,
+        viewportWidth = 24f,
+        viewportHeight = 24f
+    ).apply {
+        // Outer corners
+        path(
+            fill = null,
+            stroke = androidx.compose.ui.graphics.SolidColor(Color.White),
+            strokeLineWidth = 2f
+        ) {
+            moveTo(7f, 3f)
+            horizontalLineTo(5f)
+            curveTo(3.9f, 3f, 3f, 3.9f, 3f, 5f)
+            verticalLineTo(7f)
+            
+            moveTo(3f, 17f)
+            verticalLineTo(19f)
+            curveTo(3f, 20.1f, 3.9f, 21f, 5f, 21f)
+            horizontalLineTo(7f)
+            
+            moveTo(17f, 21f)
+            horizontalLineTo(19f)
+            curveTo(20.1f, 21f, 21f, 20.1f, 21f, 19f)
+            verticalLineTo(17f)
+            
+            moveTo(21f, 7f)
+            verticalLineTo(5f)
+            curveTo(21f, 3.9f, 20.1f, 3f, 19f, 3f)
+            horizontalLineTo(17f)
+        }
+        // Inner circle
+        path(
+            fill = null,
+            stroke = androidx.compose.ui.graphics.SolidColor(Color.White),
+            strokeLineWidth = 2f
+        ) {
+            moveTo(12f, 9f)
+            curveTo(10.34f, 9f, 9f, 10.34f, 9f, 12f)
+            curveTo(9f, 13.66f, 10.34f, 15f, 12f, 15f)
+            curveTo(13.66f, 15f, 15f, 13.66f, 15f, 12f)
+            curveTo(15f, 10.34f, 13.66f, 9f, 12f, 9f)
+            close()
+        }
+        // Small dot inside
+        path(
+            fill = androidx.compose.ui.graphics.SolidColor(Color.White)
+        ) {
+            moveTo(16.5f, 7.5f)
+            curveTo(15.95f, 7.5f, 15.5f, 7.95f, 15.5f, 8.5f)
+            curveTo(15.5f, 9.05f, 15.95f, 9.5f, 16.5f, 9.5f)
+            curveTo(17.05f, 9.5f, 17.5f, 9.05f, 17.5f, 8.5f)
+            curveTo(17.5f, 7.95f, 17.05f, 7.5f, 16.5f, 7.5f)
+            close()
+        }
+    }.build()

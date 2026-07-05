@@ -684,9 +684,33 @@ fun PhotosScreen(
                             chunks.forEach { chunkItems ->
                                 item {
                                     val colLists = remember(chunkItems, gridColumns) {
+                                        val portraits = chunkItems.filter {
+                                            val aspect = if (it.width > 0 && it.height > 0) it.width.toFloat() / it.height.toFloat() else 1f
+                                            aspect < 0.8f
+                                        }
+                                        val landscapes = chunkItems.filter {
+                                            val aspect = if (it.width > 0 && it.height > 0) it.width.toFloat() / it.height.toFloat() else 1f
+                                            aspect > 1.2f
+                                        }
+                                        val squares = chunkItems.filter {
+                                            val aspect = if (it.width > 0 && it.height > 0) it.width.toFloat() / it.height.toFloat() else 1f
+                                            aspect in 0.8f..1.2f
+                                        }
+
+                                        val balancedItems = mutableListOf<MediaItem>()
+                                        var pIdx = 0
+                                        var lIdx = 0
+                                        var sIdx = 0
+                                        val totalSize = chunkItems.size
+                                        while (balancedItems.size < totalSize) {
+                                            if (pIdx < portraits.size) balancedItems.add(portraits[pIdx++])
+                                            if (lIdx < landscapes.size) balancedItems.add(landscapes[lIdx++])
+                                            if (sIdx < squares.size) balancedItems.add(squares[sIdx++])
+                                        }
+
                                         val lists = List(gridColumns) { mutableListOf<MediaItem>() }
                                         val heights = FloatArray(gridColumns) { 0f }
-                                        for (item in chunkItems) {
+                                        for (item in balancedItems) {
                                             val aspect = if (item.width > 0 && item.height > 0) item.width.toFloat() / item.height.toFloat() else 1f
                                             val clampedAspect = aspect.coerceIn(0.6f, 1.8f)
                                             val heightWeight = 1.0f / clampedAspect
@@ -1101,6 +1125,7 @@ private fun packItemsIntoBentoRows(items: List<MediaItem>, columns: Int): List<B
     var i = 0
     val n = items.size
     var stepsSinceLarge = 2 // Start with large features allowed
+    var lastWasLeft = false
 
     while (i < n) {
         if (columns < 3) {
@@ -1128,31 +1153,32 @@ private fun packItemsIntoBentoRows(items: List<MediaItem>, columns: Int): List<B
             stepsSinceLarge = 0
             i += 1
         }
-        // 2. LargeLeft Template: 1 large (span 2) and (columns - 2) stacked columns of 2 items
-        else if (canPlaceLarge && i + 1 + 2 * (columns - 2) < n && i % 5 == 0) {
-            val large = items[i]
-            i++
-            val rightColumns = mutableListOf<Pair<MediaItem, MediaItem>>()
-            repeat(columns - 2) {
-                rightColumns.add(Pair(items[i], items[i + 1]))
-                i += 2
+        // 2. Large templates (alternate between LargeLeft and LargeRight for visual balance)
+        else if (canPlaceLarge && i + 1 + 2 * (columns - 2) < n) {
+            if (!lastWasLeft) {
+                val large = items[i]
+                i++
+                val rightColumns = mutableListOf<Pair<MediaItem, MediaItem>>()
+                repeat(columns - 2) {
+                    rightColumns.add(Pair(items[i], items[i + 1]))
+                    i += 2
+                }
+                specs.add(BentoRowSpec.LargeLeft(large, rightColumns))
+                lastWasLeft = true
+            } else {
+                val leftColumns = mutableListOf<Pair<MediaItem, MediaItem>>()
+                repeat(columns - 2) {
+                    leftColumns.add(Pair(items[i], items[i + 1]))
+                    i += 2
+                }
+                val large = items[i]
+                i++
+                specs.add(BentoRowSpec.LargeRight(leftColumns, large))
+                lastWasLeft = false
             }
-            specs.add(BentoRowSpec.LargeLeft(large, rightColumns))
             stepsSinceLarge = 0
         }
-        // 3. LargeRight Template: (columns - 2) stacked columns of 2 items and 1 large (span 2)
-        else if (canPlaceLarge && i + 1 + 2 * (columns - 2) < n && i % 5 == 2) {
-            val leftColumns = mutableListOf<Pair<MediaItem, MediaItem>>()
-            repeat(columns - 2) {
-                leftColumns.add(Pair(items[i], items[i + 1]))
-                i += 2
-            }
-            val large = items[i]
-            i++
-            specs.add(BentoRowSpec.LargeRight(leftColumns, large))
-            stepsSinceLarge = 0
-        }
-        // 4. Standard Small Row: chunk exactly `columns` small items
+        // 3. Standard Small Row: chunk exactly `columns` small items
         else {
             val rowItems = mutableListOf<MediaItem>()
             for (j in 0 until columns) {

@@ -15,7 +15,20 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.foundation.gestures.waitForUpOrCancellation
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
@@ -410,23 +423,37 @@ fun PhotosScreen(
         recommended
     }
 
-    // Pinch-to-Zoom grid column gesture tracker
-    var zoomAccumulator by remember { mutableStateOf(1f) }
+    // Pinch-to-Zoom grid column gesture tracker with buttery continuous scale and spring snap
+    val gridScaleAnim = remember { Animatable(1f) }
+    var isPinching by remember { mutableStateOf(false) }
+
     val pinchModifier = Modifier.pointerInput(gridColumns, layoutMode) {
-        detectTransformGestures { _, _, zoom, _ ->
-            // Pinch gesture is disabled in Justified and Compact layouts to maintain visual focus
-            if (layoutMode != "justified" && layoutMode != "compact") {
-                zoomAccumulator *= zoom
-                if (zoomAccumulator > 1.35f) {
-                    if (gridColumns > 1) {
-                        onColumnsChange(gridColumns - 1)
+        if (layoutMode != "justified" && layoutMode != "compact") {
+            awaitEachGesture {
+                awaitFirstDown(requireUnconsumed = false)
+                do {
+                    val event = awaitPointerEvent()
+                    val canceled = event.changes.any { it.isConsumed }
+                    if (!canceled && event.changes.size >= 2) {
+                        isPinching = true
+                        val zoom = event.calculateZoom()
+                        coroutineScope.launch {
+                            gridScaleAnim.snapTo((gridScaleAnim.value * zoom).coerceIn(0.6f, 1.8f))
+                        }
                     }
-                    zoomAccumulator = 1f
-                } else if (zoomAccumulator < 0.65f) {
-                    if (gridColumns < 6) {
+                } while (event.changes.any { it.pressed })
+
+                if (isPinching) {
+                    isPinching = false
+                    val finalZoom = gridScaleAnim.value
+                    if (finalZoom > 1.25f && gridColumns > 1) {
+                        onColumnsChange(gridColumns - 1)
+                    } else if (finalZoom < 0.75f && gridColumns < 6) {
                         onColumnsChange(gridColumns + 1)
                     }
-                    zoomAccumulator = 1f
+                    coroutineScope.launch {
+                        gridScaleAnim.animateTo(1f, spring(stiffness = Spring.StiffnessMediumLow))
+                    }
                 }
             }
         }
@@ -517,7 +544,11 @@ fun PhotosScreen(
                         .fillMaxSize()
                         .weight(1f)
                         .padding(horizontal = 16.dp)
-                        .then(pinchModifier),
+                        .then(pinchModifier)
+                        .graphicsLayer {
+                            scaleX = gridScaleAnim.value
+                            scaleY = gridScaleAnim.value
+                        },
                     verticalArrangement = Arrangement.spacedBy(
                         if (layoutMode == "compact") 4.dp
                         else if (layoutMode == "bento" && gridColumns >= 5) 4.dp
@@ -748,30 +779,44 @@ fun PhotosScreen(
             }
         }
 
-        // --- PREMIUM BLURRED FLOATING QUICK PREVIEW OVERLAY ---
-        previewItem?.let { item ->
-            Dialog(
-                onDismissRequest = { previewItem = null },
-                properties = DialogProperties(
-                    usePlatformDefaultWidth = false,
-                    dismissOnBackPress = true,
-                    dismissOnClickOutside = true
-                )
+        // --- PREMIUM FLOATING QUICK PREVIEW OVERLAY (No Blur, Buttery Spring Animation) ---
+        AnimatedVisibility(
+            visible = previewItem != null,
+            enter = fadeIn(animationSpec = tween(150)),
+            exit = fadeOut(animationSpec = tween(150)),
+            modifier = Modifier.fillMaxSize()
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color.Black.copy(alpha = 0.55f))
+                    .clickable { previewItem = null }, // Tap overlay to dismiss
+                contentAlignment = Alignment.Center
             ) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .background(Color.Black.copy(alpha = 0.45f))
-                        .blur(8.dp),
-                    contentAlignment = Alignment.Center
-                ) {
+                previewItem?.let { item ->
+                    var animScale by remember { mutableStateOf(0.85f) }
+                    LaunchedEffect(item) {
+                        animScale = 1.0f
+                    }
+                    val scale by animateFloatAsState(
+                        targetValue = animScale,
+                        animationSpec = spring(
+                            stiffness = Spring.StiffnessMediumLow,
+                            dampingRatio = Spring.DampingRatioLowBouncy
+                        )
+                    )
+
                     Card(
                         modifier = Modifier
-                            .fillMaxWidth(0.85f)
+                            .fillMaxWidth(0.82f)
                             .wrapContentHeight()
-                            .padding(16.dp),
-                        shape = RoundedCornerShape(16.dp),
-                        elevation = CardDefaults.cardElevation(defaultElevation = 12.dp),
+                            .clickable(enabled = false) {} // Prevent click-through
+                            .graphicsLayer {
+                                scaleX = scale
+                                scaleY = scale
+                            },
+                        shape = RoundedCornerShape(20.dp),
+                        elevation = CardDefaults.cardElevation(defaultElevation = 16.dp),
                         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
                     ) {
                         Column(modifier = Modifier.fillMaxWidth()) {
@@ -795,7 +840,7 @@ fun PhotosScreen(
                                     ) {
                                         Box(
                                             modifier = Modifier
-                                                .size(60.dp)
+                                                .size(56.dp)
                                                 .clip(RoundedCornerShape(99.dp))
                                                 .background(Color.Black.copy(alpha = 0.5f)),
                                             contentAlignment = Alignment.Center

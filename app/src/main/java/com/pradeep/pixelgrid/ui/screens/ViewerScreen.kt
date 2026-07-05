@@ -21,6 +21,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectTransformGestures
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -100,6 +101,7 @@ fun ViewerScreen(
     var showUi by remember { mutableStateOf(true) }
     var showInfoDrawer by remember { mutableStateOf(false) }
     var isZoomed by remember { mutableStateOf(false) }
+    var dragDismissFraction by remember { mutableStateOf(0f) }
 
     // Set up horizontal pager state
     val pagerState = rememberPagerState(initialPage = initialIndex, pageCount = { mediaList.size })
@@ -193,6 +195,7 @@ fun ViewerScreen(
         Color.Black // Pitch Black
     }
     val animatedBgColor by animateColorAsState(targetBgColor, animationSpec = tween(300))
+    val finalBgColor = animatedBgColor.copy(alpha = (1f - dragDismissFraction).coerceIn(0f, 1f))
 
     // Theme content colors: overlays are transparent to let photo show edge-to-edge behind them
     val headerColor = Color.Transparent
@@ -203,7 +206,7 @@ fun ViewerScreen(
     Box(
         modifier = modifier
             .fillMaxSize()
-            .background(animatedBgColor)
+            .background(finalBgColor)
     ) {
         // --- HORIZONTAL PAGER CONTENT ---
         HorizontalPager(
@@ -214,9 +217,71 @@ fun ViewerScreen(
         ) { page ->
             val pageItem = mediaList.getOrNull(page)
             if (pageItem != null) {
+                var verticalOffsetY by remember { mutableStateOf(0f) }
+
                 // Image container remains locked in full screen bounds (zero layout shifts on UI changes)
+                // Added vertical swipe-to-dismiss (drag down) and swipe-to-info (drag up) gestures
                 Box(
-                    modifier = Modifier.fillMaxSize()
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .pointerInput(isZoomed) {
+                            if (!isZoomed) {
+                                detectDragGestures(
+                                    onDrag = { change, dragAmount ->
+                                        change.consume()
+                                        verticalOffsetY += dragAmount.y
+                                        dragDismissFraction = (abs(verticalOffsetY) / 1000f).coerceIn(0f, 1f)
+                                    },
+                                    onDragEnd = {
+                                        if (verticalOffsetY > 220f) {
+                                            onBack()
+                                        } else if (verticalOffsetY < -220f) {
+                                            showInfoDrawer = true
+                                            coroutineScope.launch {
+                                                androidx.compose.animation.core.animate(
+                                                    initialValue = verticalOffsetY,
+                                                    targetValue = 0f,
+                                                    animationSpec = spring(stiffness = Spring.StiffnessMedium)
+                                                ) { value, _ ->
+                                                    verticalOffsetY = value
+                                                    dragDismissFraction = (abs(value) / 1000f).coerceIn(0f, 1f)
+                                                }
+                                            }
+                                        } else {
+                                            coroutineScope.launch {
+                                                androidx.compose.animation.core.animate(
+                                                    initialValue = verticalOffsetY,
+                                                    targetValue = 0f,
+                                                    animationSpec = spring(stiffness = Spring.StiffnessMedium)
+                                                ) { value, _ ->
+                                                    verticalOffsetY = value
+                                                    dragDismissFraction = (abs(value) / 1000f).coerceIn(0f, 1f)
+                                                }
+                                            }
+                                        }
+                                    },
+                                    onDragCancel = {
+                                        coroutineScope.launch {
+                                            androidx.compose.animation.core.animate(
+                                                initialValue = verticalOffsetY,
+                                                targetValue = 0f,
+                                                animationSpec = spring(stiffness = Spring.StiffnessMedium)
+                                            ) { value, _ ->
+                                                verticalOffsetY = value
+                                                dragDismissFraction = (abs(value) / 1000f).coerceIn(0f, 1f)
+                                            }
+                                        }
+                                    }
+                                )
+                            }
+                        }
+                        .graphicsLayer {
+                            translationY = verticalOffsetY
+                            // Scale down slightly as user drags down to dismiss, creating standard gallery pop-out feel
+                            val scale = (1f - (abs(verticalOffsetY) / 3000f)).coerceIn(0.85f, 1f)
+                            scaleX = scale
+                            scaleY = scale
+                        }
                 ) {
                     if (pageItem.isVideo) {
                         VideoPlayer(

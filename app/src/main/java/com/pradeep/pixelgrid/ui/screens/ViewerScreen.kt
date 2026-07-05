@@ -12,10 +12,16 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -109,12 +115,55 @@ fun ViewerScreen(
     var isZoomed by remember { mutableStateOf(false) }
     var dragDismissFraction by remember { mutableStateOf(0f) }
 
+    // Exit transition states for buttery motion on close/back press
+    var isExiting by remember { mutableStateOf(false) }
+    var exitOffsetY by remember { mutableStateOf(0f) }
+    var exitScale by remember { mutableStateOf(1f) }
+    var exitAlpha by remember { mutableStateOf(1f) }
+
+    LaunchedEffect(isExiting) {
+        if (isExiting) {
+            showUi = false
+            showInfoDrawer = false
+            val animOffset = Animatable(exitOffsetY)
+            val animScale = Animatable(exitScale)
+            val animAlpha = Animatable(exitAlpha)
+            
+            coroutineScope.launch {
+                animOffset.animateTo(
+                    targetValue = exitOffsetY + 900f, // slide down offscreen
+                    animationSpec = tween(durationMillis = 260, easing = FastOutSlowInEasing)
+                ) {
+                    exitOffsetY = value
+                }
+            }
+            coroutineScope.launch {
+                animScale.animateTo(
+                    targetValue = 0.82f, // scale down
+                    animationSpec = tween(durationMillis = 260, easing = FastOutSlowInEasing)
+                ) {
+                    exitScale = value
+                }
+            }
+            coroutineScope.launch {
+                animAlpha.animateTo(
+                    targetValue = 0f, // fade out
+                    animationSpec = tween(durationMillis = 240, easing = LinearEasing)
+                ) {
+                    exitAlpha = value
+                }
+            }
+            delay(270)
+            onBack()
+        }
+    }
+
     // Intercept system back button/gesture to prevent app exit, returning to grid instead
     BackHandler(enabled = true) {
         if (showInfoDrawer) {
             showInfoDrawer = false
         } else {
-            onBack()
+            isExiting = true
         }
     }
 
@@ -210,7 +259,7 @@ fun ViewerScreen(
         Color.Black // Pitch Black
     }
     val animatedBgColor by animateColorAsState(targetBgColor, animationSpec = tween(300))
-    val finalBgColor = animatedBgColor.copy(alpha = (1f - dragDismissFraction).coerceIn(0f, 1f))
+    val finalBgColor = animatedBgColor.copy(alpha = ((1f - dragDismissFraction) * exitAlpha).coerceIn(0f, 1f))
 
     // Theme content colors: overlays are transparent to let photo show edge-to-edge behind them
     val headerColor = Color.Transparent
@@ -226,7 +275,7 @@ fun ViewerScreen(
         // --- HORIZONTAL PAGER CONTENT ---
         HorizontalPager(
             state = pagerState,
-            userScrollEnabled = !isZoomed, // Lock scrolling when active image is zoomed
+            userScrollEnabled = !isZoomed && !showInfoDrawer, // Lock scrolling when active image is zoomed or details sheet is open
             modifier = Modifier.fillMaxSize(),
             pageSpacing = 16.dp
         ) { page ->
@@ -249,7 +298,7 @@ fun ViewerScreen(
                                     },
                                     onDragEnd = {
                                         if (verticalOffsetY > 220f) {
-                                            onBack()
+                                            isExiting = true // Trigger smooth exit animation instead of jumping
                                         } else if (verticalOffsetY < -220f) {
                                             showInfoDrawer = true
                                             coroutineScope.launch {
@@ -281,7 +330,7 @@ fun ViewerScreen(
                                                 initialValue = verticalOffsetY,
                                                 targetValue = 0f,
                                                 animationSpec = spring(stiffness = Spring.StiffnessMedium)
-                                            ) { value, _ ->
+                                              ) { value, _ ->
                                                 verticalOffsetY = value
                                                 dragDismissFraction = (abs(value) / 1000f).coerceIn(0f, 1f)
                                             }
@@ -291,11 +340,13 @@ fun ViewerScreen(
                             }
                         }
                         .graphicsLayer {
-                            translationY = verticalOffsetY
+                            translationY = verticalOffsetY + exitOffsetY
                             // Scale down slightly as user drags down to dismiss, creating standard gallery pop-out feel
-                            val scale = (1f - (abs(verticalOffsetY) / 3000f)).coerceIn(0.85f, 1f)
-                            scaleX = scale
-                            scaleY = scale
+                            val dragScale = (1f - (abs(verticalOffsetY) / 3000f)).coerceIn(0.85f, 1f)
+                            val finalScale = dragScale * exitScale
+                            scaleX = finalScale
+                            scaleY = finalScale
+                            alpha = exitAlpha * (1f - dragDismissFraction)
                         }
                 ) {
                     if (pageItem.isVideo) {
@@ -342,7 +393,7 @@ fun ViewerScreen(
                     horizontalArrangement = Arrangement.Start,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    IconButton(onClick = onBack) {
+                    IconButton(onClick = { isExiting = true }) {
                         Icon(Icons.Default.ArrowBack, contentDescription = "Back", tint = headerContentColor)
                     }
                     Spacer(Modifier.width(12.dp))
@@ -488,47 +539,76 @@ fun ViewerScreen(
             }
         }
 
-        // --- SHADCN INFO DRAWER ---
-        AnimatedVisibility(
-            visible = showInfoDrawer,
-            enter = slideInVertically(initialOffsetY = { it }),
-            exit = slideOutVertically(targetOffsetY = { it }),
+        // --- GOOGLE PHOTOS STYLE DETAILS SHEET ---
+        val density = LocalDensity.current
+        val sheetHeight = 460.dp
+        val targetSheetOffsetY = if (showInfoDrawer) 0f else with(density) { sheetHeight.toPx() }
+        var dragSheetOffset by remember { mutableStateOf(0f) }
+        val animatedSheetOffsetY by animateFloatAsState(
+            targetValue = targetSheetOffsetY + dragSheetOffset,
+            animationSpec = spring(stiffness = Spring.StiffnessMediumLow)
+        )
+
+        Box(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
-                .navigationBarsPadding()
-        ) {
-            ShadcnCard(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(16.dp)
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = "File Details",
-                        style = MaterialTheme.typography.titleLarge,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onBackground
+                .fillMaxWidth()
+                .height(sheetHeight)
+                .offset { IntOffset(0, animatedSheetOffsetY.roundToInt()) }
+                .background(
+                    color = Color(0xEE121214), // Premium dark glass
+                    shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)
+                )
+                .border(
+                    width = 1.dp,
+                    color = Color.White.copy(alpha = 0.08f),
+                    shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)
+                )
+                .pointerInput(Unit) {
+                    detectVerticalDragGestures(
+                        onVerticalDrag = { change, dragAmount ->
+                            change.consume()
+                            // Drag downwards to dismiss details
+                            dragSheetOffset = (dragSheetOffset + dragAmount).coerceAtLeast(0f)
+                        },
+                        onDragEnd = {
+                            if (dragSheetOffset > 150f) {
+                                showInfoDrawer = false
+                            }
+                            dragSheetOffset = 0f
+                        },
+                        onDragCancel = {
+                            dragSheetOffset = 0f
+                        }
                     )
-                    IconButton(onClick = { showInfoDrawer = false }) {
-                        Text(
-                            "Close",
-                            style = MaterialTheme.typography.labelLarge,
-                            color = MaterialTheme.colorScheme.primary,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                    }
                 }
+                .padding(horizontal = 24.dp, vertical = 8.dp)
+        ) {
+            // Drag indicator gray bar
+            Box(
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .padding(top = 8.dp, bottom = 16.dp)
+                    .width(36.dp)
+                    .height(4.dp)
+                    .background(Color.White.copy(alpha = 0.3f), CircleShape)
+            )
 
-                Spacer(Modifier.height(16.dp))
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(top = 28.dp)
+                    .verticalScroll(rememberScrollState())
+            ) {
+                Text(
+                    text = "Details",
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White,
+                    modifier = Modifier.padding(bottom = 20.dp)
+                )
 
-                Column(
-                    verticalArrangement = Arrangement.spacedBy(10.dp),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
+                Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
                     InfoRow(label = "Filename", value = activeItem.name)
                     InfoRow(label = "Folder", value = activeItem.bucketName)
                     InfoRow(label = "Type", value = activeItem.mimeType)

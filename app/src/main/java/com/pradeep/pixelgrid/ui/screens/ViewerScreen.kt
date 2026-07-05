@@ -21,7 +21,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectTransformGestures
-import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -226,10 +226,10 @@ fun ViewerScreen(
                         .fillMaxSize()
                         .pointerInput(isZoomed) {
                             if (!isZoomed) {
-                                detectDragGestures(
-                                    onDrag = { change, dragAmount ->
+                                detectVerticalDragGestures(
+                                    onVerticalDrag = { change, dragAmount ->
                                         change.consume()
-                                        verticalOffsetY += dragAmount.y
+                                        verticalOffsetY += dragAmount
                                         dragDismissFraction = (abs(verticalOffsetY) / 1000f).coerceIn(0f, 1f)
                                     },
                                     onDragEnd = {

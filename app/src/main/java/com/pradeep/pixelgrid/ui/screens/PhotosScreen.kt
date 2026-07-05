@@ -50,6 +50,8 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import coil.compose.AsyncImage
+import coil.request.ImageRequest
+import coil.request.videoFrameMillis
 import com.pradeep.pixelgrid.data.MediaItem
 import com.pradeep.pixelgrid.data.MediaRepository
 import com.pradeep.pixelgrid.ui.components.ShadcnBadge
@@ -227,17 +229,25 @@ fun PhotosScreen(
         }
     }
 
-    // Dynamic memories generation
+    // Dynamic memories recommendation engine
     val memoryItems = remember(mediaList) {
-        val list = mutableListOf<MemoryCardInfo>()
+        val allMemories = mutableListOf<MemoryCardInfo>()
         
-        // Favorites memory card
+        // 1. Favorites memory card
         val favs = mediaList.filter { it.isFavorite }
         if (favs.isNotEmpty()) {
-            list.add(MemoryCardInfo("Favorites", favs.first().uri, "Your absolute highlights"))
+            allMemories.add(
+                MemoryCardInfo(
+                    id = "favorites",
+                    title = "Favorites",
+                    subtitle = "Your absolute standout moments",
+                    coverUri = favs.first().uri,
+                    items = favs.sortedByDescending { it.dateAdded }
+                )
+            )
         }
 
-        // On This Day memory card
+        // 2. On This Day memory card
         val calendarToday = Calendar.getInstance()
         val todayMonth = calendarToday.get(Calendar.MONTH)
         val todayDay = calendarToday.get(Calendar.DAY_OF_MONTH)
@@ -246,21 +256,173 @@ fun PhotosScreen(
             photoCal.get(Calendar.MONTH) == todayMonth && photoCal.get(Calendar.DAY_OF_MONTH) == todayDay && photoCal.get(Calendar.YEAR) < calendarToday.get(Calendar.YEAR)
         }
         if (onThisDayPhotos.isNotEmpty()) {
-            list.add(MemoryCardInfo("On This Day", onThisDayPhotos.first().uri, "Flashbacks from years past"))
+            val yearsAgo = calendarToday.get(Calendar.YEAR) - Calendar.getInstance().apply { time = Date(onThisDayPhotos.first().dateAdded * 1000) }.get(Calendar.YEAR)
+            val suffix = if (yearsAgo == 1) "year ago" else "years ago"
+            allMemories.add(
+                MemoryCardInfo(
+                    id = "on_this_day",
+                    title = "On This Day",
+                    subtitle = "$yearsAgo $suffix today",
+                    coverUri = onThisDayPhotos.first().uri,
+                    items = onThisDayPhotos.sortedByDescending { it.dateAdded }
+                )
+            )
         }
 
-        // Recent videos card
-        val videos = mediaList.filter { it.isVideo }
-        if (videos.isNotEmpty()) {
-            list.add(MemoryCardInfo("Recent Clips", videos.first().uri, "Relive action captures"))
+        // 3. Trip detection based on high-density capture windows (e.g. 10+ items within 48 hours)
+        val sortedMedia = mediaList.sortedBy { it.dateAdded }
+        if (sortedMedia.isNotEmpty()) {
+            var currentTrip = mutableListOf<MediaItem>()
+            var lastTime = 0L
+            val trips = mutableListOf<List<MediaItem>>()
+            
+            for (item in sortedMedia) {
+                if (currentTrip.isEmpty()) {
+                    currentTrip.add(item)
+                    lastTime = item.dateAdded
+                } else {
+                    if (item.dateAdded - lastTime <= 48 * 3600) {
+                        currentTrip.add(item)
+                        lastTime = item.dateAdded
+                    } else {
+                        if (currentTrip.size >= 10) {
+                            trips.add(currentTrip)
+                        }
+                        currentTrip = mutableListOf(item)
+                        lastTime = item.dateAdded
+                    }
+                }
+            }
+            if (currentTrip.size >= 10) {
+                trips.add(currentTrip)
+            }
+
+            trips.forEachIndexed { index, tripItems ->
+                val startCal = Calendar.getInstance().apply { time = Date(tripItems.first().dateAdded * 1000) }
+                val monthName = SimpleDateFormat("MMMM", Locale.getDefault()).format(startCal.time)
+                val year = startCal.get(Calendar.YEAR)
+                val bucket = tripItems.first().bucketName
+                val title = if (bucket.isNotEmpty() && bucket != "0" && bucket != "Camera") "Trip to $bucket" else "Adventure in $monthName"
+                allMemories.add(
+                    MemoryCardInfo(
+                        id = "trip_$index",
+                        title = title,
+                        subtitle = "$monthName $year (${tripItems.size} items)",
+                        coverUri = tripItems.first().uri,
+                        items = tripItems.sortedByDescending { it.dateAdded }
+                    )
+                )
+            }
         }
 
-        // Recently Added card
-        if (mediaList.isNotEmpty()) {
-            list.add(MemoryCardInfo("Recent Shots", mediaList.first().uri, "Fresh in your vault"))
+        // 4. Rediscovered Moments (old photos that aren't favorites)
+        val oldestMedia = mediaList.sortedBy { it.dateAdded }
+        if (oldestMedia.size > 15) {
+            val sliceSize = oldestMedia.size / 5
+            val candidates = oldestMedia.take(sliceSize).filter { !it.isFavorite }
+            if (candidates.isNotEmpty()) {
+                val cover = candidates.first()
+                allMemories.add(
+                    MemoryCardInfo(
+                        id = "rediscovered",
+                        title = "Rediscovered Moments",
+                        subtitle = "A look back at lost captures",
+                        coverUri = cover.uri,
+                        items = candidates.shuffled(Random(42))
+                    )
+                )
+            }
         }
 
-        list
+        // 5. Seasonal Flashback
+        val currentMonth = calendarToday.get(Calendar.MONTH)
+        val seasonName = when (currentMonth) {
+            Calendar.DECEMBER, Calendar.JANUARY, Calendar.FEBRUARY -> "Winter"
+            Calendar.MARCH, Calendar.APRIL, Calendar.MAY -> "Spring"
+            Calendar.JUNE, Calendar.JULY, Calendar.AUGUST -> "Summer"
+            else -> "Autumn"
+        }
+        val seasonalItems = mediaList.filter {
+            val itemCal = Calendar.getInstance().apply { time = Date(it.dateAdded * 1000) }
+            val itemMonth = itemCal.get(Calendar.MONTH)
+            val sameSeason = when (seasonName) {
+                "Winter" -> itemMonth in listOf(Calendar.DECEMBER, Calendar.JANUARY, Calendar.FEBRUARY)
+                "Spring" -> itemMonth in listOf(Calendar.MARCH, Calendar.APRIL, Calendar.MAY)
+                "Summer" -> itemMonth in listOf(Calendar.JUNE, Calendar.JULY, Calendar.AUGUST)
+                else -> itemMonth in listOf(Calendar.SEPTEMBER, Calendar.OCTOBER, Calendar.NOVEMBER)
+            }
+            sameSeason && itemCal.get(Calendar.YEAR) < calendarToday.get(Calendar.YEAR)
+        }
+        if (seasonalItems.isNotEmpty()) {
+            allMemories.add(
+                MemoryCardInfo(
+                    id = "seasonal",
+                    title = "$seasonName Flashback",
+                    subtitle = "Relive your $seasonName memories",
+                    coverUri = seasonalItems.first().uri,
+                    items = seasonalItems.sortedByDescending { it.dateAdded }
+                )
+            )
+        }
+
+        // 6. Weekend Vibing
+        val weekendItems = mediaList.filter {
+            val itemCal = Calendar.getInstance().apply { time = Date(it.dateAdded * 1000) }
+            val dayOfWeek = itemCal.get(Calendar.DAY_OF_WEEK)
+            dayOfWeek == Calendar.SATURDAY || dayOfWeek == Calendar.SUNDAY
+        }
+        if (weekendItems.size >= 5) {
+            allMemories.add(
+                MemoryCardInfo(
+                    id = "weekend",
+                    title = "Weekend Highlights",
+                    subtitle = "Chill captures and weekend vibes",
+                    coverUri = weekendItems.first().uri,
+                    items = weekendItems.sortedByDescending { it.dateAdded }
+                )
+            )
+        }
+
+        // 7. Spotlight on Portraits
+        val portraits = mediaList.filter {
+            val aspect = if (it.width > 0 && it.height > 0) it.width.toFloat() / it.height.toFloat() else 1f
+            aspect in 0.55f..0.78f && !it.isVideo
+        }
+        if (portraits.size >= 5) {
+            allMemories.add(
+                MemoryCardInfo(
+                    id = "portraits",
+                    title = "Portrait Spotlights",
+                    subtitle = "Standout portrait and selfie captures",
+                    coverUri = portraits.first().uri,
+                    items = portraits.sortedByDescending { it.dateAdded }
+                )
+            )
+        }
+
+        // --- DYNAMIC ROTATION RECOMMENDATION ENGINE ---
+        val daySeed = calendarToday.get(Calendar.DAY_OF_YEAR)
+        val rand = Random(daySeed.toLong())
+        
+        val recommended = mutableListOf<MemoryCardInfo>()
+        val pool = allMemories.toMutableList()
+        
+        val onThisDayCard = pool.find { it.id == "on_this_day" }
+        if (onThisDayCard != null) {
+            recommended.add(onThisDayCard)
+            pool.remove(onThisDayCard)
+        }
+        val favoritesCard = pool.find { it.id == "favorites" }
+        if (favoritesCard != null) {
+            recommended.add(favoritesCard)
+            pool.remove(favoritesCard)
+        }
+        
+        while (recommended.size < 4 && pool.isNotEmpty()) {
+            val selectIdx = rand.nextInt(pool.size)
+            recommended.add(pool.removeAt(selectIdx))
+        }
+        recommended
     }
 
     // Pinch-to-Zoom grid column gesture tracker
@@ -424,15 +586,8 @@ fun PhotosScreen(
                                                     .size(width = 160.dp, height = 100.dp)
                                                     .clip(RoundedCornerShape(12.dp))
                                                     .clickable {
-                                                        val targetIndex = mediaList.indexOfFirst {
-                                                            when (memory.title) {
-                                                                "Favorites" -> it.isFavorite
-                                                                "Recent Clips" -> it.isVideo
-                                                                else -> true
-                                                            }
-                                                        }
-                                                        if (targetIndex != -1) {
-                                                            onMediaClick(mediaList, targetIndex)
+                                                        if (memory.items.isNotEmpty()) {
+                                                            onMediaClick(memory.items, 0)
                                                         }
                                                     }
                                             ) {
@@ -998,9 +1153,11 @@ fun PhotosScreen(
 
 // Memory Spotlight Card spec class
 private data class MemoryCardInfo(
+    val id: String,
     val title: String,
+    val subtitle: String,
     val coverUri: Uri,
-    val subtitle: String
+    val items: List<MediaItem>
 )
 
 // Reusable Date Header Composable
@@ -1087,8 +1244,19 @@ private fun BentoImageTile(
                 }
             }
     ) {
+        val context = LocalContext.current
+        val imageModel = remember(item) {
+            if (item.isVideo) {
+                ImageRequest.Builder(context)
+                    .data(item.uri)
+                    .videoFrameMillis(1000)
+                    .build()
+            } else {
+                item.uri as Any
+            }
+        }
         AsyncImage(
-            model = item.uri,
+            model = imageModel,
             contentDescription = item.name,
             modifier = Modifier.fillMaxSize(),
             contentScale = ContentScale.Crop,

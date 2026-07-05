@@ -28,6 +28,9 @@ import coil.compose.AsyncImage
 import com.pradeep.pixelgrid.data.MediaBucket
 import com.pradeep.pixelgrid.data.MediaItem
 import com.pradeep.pixelgrid.ui.components.ShadcnCard
+import com.pradeep.pixelgrid.ui.components.ShadcnBadge
+import androidx.compose.ui.graphics.Color
+import java.util.Locale
 
 @Composable
 fun AlbumsScreen(
@@ -177,6 +180,27 @@ fun AlbumsScreen(
                                 modifier = Modifier.fillMaxSize(),
                                 contentScale = ContentScale.Crop
                             )
+                            if (item.isVideo) {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .background(Color.Black.copy(alpha = 0.25f))
+                                )
+                                val durationString = remember(item.duration) {
+                                    val totalSeconds = item.duration / 1000
+                                    val minutes = totalSeconds / 60
+                                    val seconds = totalSeconds % 60
+                                    String.format(Locale.getDefault(), "%d:%02d", minutes, seconds)
+                                }
+                                ShadcnBadge(
+                                    text = durationString,
+                                    modifier = Modifier
+                                        .align(Alignment.BottomEnd)
+                                        .padding(6.dp),
+                                    color = Color.Black.copy(alpha = 0.6f),
+                                    textColor = Color.White
+                                )
+                            }
                         }
                     }
                 }

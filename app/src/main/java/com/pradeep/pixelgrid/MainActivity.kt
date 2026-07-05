@@ -12,9 +12,21 @@ import androidx.compose.runtime.setValue
 import com.pradeep.pixelgrid.ui.MainApp
 import com.pradeep.pixelgrid.ui.theme.PixelVaultTheme
 
+import coil.ImageLoader
+import coil.decode.VideoFrameDecoder
+
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        
+        // Initialize Coil ImageLoader with VideoFrameDecoder
+        val imageLoader = ImageLoader.Builder(applicationContext)
+            .components {
+                add(VideoFrameDecoder.Factory())
+            }
+            .crossfade(true)
+            .build()
+        coil.Coil.setImageLoader(imageLoader)
         
         // Enable edge-to-edge transparent system bars
         enableEdgeToEdge()
